@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { bottomNavStyles as styles } from '@/styles';
 
 export type TabType = 'home' | 'reports' | 'schedule' | 'settings';
 
@@ -14,7 +15,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   // Safe clearance for Android 3-button navigation (||| O <) and gesture bar
   const bottomInsetPadding = Math.max(insets.bottom, 12) + 8;
 
-  const tabs: Array<{ id: TabType; label: string }> = [
+  const tabs: { id: TabType; label: string }[] = [
     { id: 'home', label: 'Home' },
     { id: 'reports', label: 'Reports' },
     { id: 'schedule', label: 'Schedule' },
@@ -23,12 +24,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
 
   return (
     <View
-      style={{
-        backgroundColor: '#16131D',
-        borderTopColor: '#2D273A',
-        paddingBottom: bottomInsetPadding,
-        paddingTop: 10,
-      }}
+      style={[styles.container, { paddingBottom: bottomInsetPadding }]}
       className="border-t flex-row justify-around items-center px-3"
     >
       {tabs.map((tab) => {
@@ -53,7 +49,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
 
             {/* Label */}
             <Text
-              style={{ color }}
+              style={isActive ? styles.labelActive : styles.labelInactive}
               className={`text-[11px] font-semibold tracking-tight ${
                 isActive ? 'font-bold' : ''
               }`}
@@ -73,38 +69,24 @@ function HomeIcon({ color }: { color: string }) {
     <View className="w-5 h-5 items-center justify-end">
       {/* Roof peak */}
       <View
-        style={{
-          width: 0,
-          height: 0,
-          borderLeftWidth: 9,
-          borderRightWidth: 9,
-          borderBottomWidth: 7,
-          borderLeftColor: 'transparent',
-          borderRightColor: 'transparent',
-          borderBottomColor: color,
-        }}
+        style={[
+          styles.homeRoof,
+          { borderBottomColor: color },
+        ]}
       />
       {/* House Body */}
       <View
-        style={{
-          width: 14,
-          height: 10,
-          borderWidth: 1.8,
-          borderColor: color,
-          borderTopWidth: 0,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
+        style={[
+          styles.homeBody,
+          { borderColor: color },
+        ]}
       >
         {/* Door */}
         <View
-          style={{
-            width: 4,
-            height: 5,
-            backgroundColor: color,
-            borderTopLeftRadius: 1,
-            borderTopRightRadius: 1,
-          }}
+          style={[
+            styles.homeDoor,
+            { backgroundColor: color },
+          ]}
         />
       </View>
     </View>
@@ -115,33 +97,9 @@ function HomeIcon({ color }: { color: string }) {
 function ReportsIcon({ color }: { color: string }) {
   return (
     <View className="w-5 h-5 flex-row items-end justify-between px-0.5 pb-0.5">
-      {/* Left bar */}
-      <View
-        style={{
-          width: 3.5,
-          height: 10,
-          backgroundColor: color,
-          borderRadius: 1.5,
-        }}
-      />
-      {/* Center bar */}
-      <View
-        style={{
-          width: 3.5,
-          height: 16,
-          backgroundColor: color,
-          borderRadius: 1.5,
-        }}
-      />
-      {/* Right bar */}
-      <View
-        style={{
-          width: 3.5,
-          height: 13,
-          backgroundColor: color,
-          borderRadius: 1.5,
-        }}
-      />
+      <View style={[styles.barColumn, styles.barLeft, { backgroundColor: color }]} />
+      <View style={[styles.barColumn, styles.barCenter, { backgroundColor: color }]} />
+      <View style={[styles.barColumn, styles.barRight, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -152,31 +110,26 @@ function ScheduleIcon({ color }: { color: string }) {
     <View className="w-5 h-5 items-center justify-center">
       {/* Top hanger loops */}
       <View className="flex-row justify-between w-3.5 mb-[-2px] z-10">
-        <View style={{ width: 1.8, height: 3, backgroundColor: color, borderRadius: 1 }} />
-        <View style={{ width: 1.8, height: 3, backgroundColor: color, borderRadius: 1 }} />
+        <View style={[styles.hangerLoop, { backgroundColor: color }]} />
+        <View style={[styles.hangerLoop, { backgroundColor: color }]} />
       </View>
 
       {/* Calendar body */}
       <View
-        style={{
-          width: 16,
-          height: 14,
-          borderWidth: 1.8,
-          borderColor: color,
-          borderRadius: 3,
-          padding: 1.5,
-          justifyContent: 'space-around',
-        }}
+        style={[
+          styles.calendarBody,
+          { borderColor: color },
+        ]}
       >
         <View className="flex-row justify-around">
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
         </View>
         <View className="flex-row justify-around">
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
-          <View style={{ width: 2, height: 2, backgroundColor: color, borderRadius: 1 }} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
+          <View style={[styles.calendarDot, { backgroundColor: color }]} />
         </View>
       </View>
     </View>
@@ -189,45 +142,17 @@ function SettingsIcon({ color }: { color: string }) {
     <View className="w-5 h-5 items-center justify-center">
       {/* Outer Gear Outline */}
       <View
-        style={{
-          width: 15,
-          height: 15,
-          borderWidth: 1.8,
-          borderColor: color,
-          borderRadius: 7.5,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        style={[
+          styles.gearOutline,
+          { borderColor: color },
+        ]}
       >
         {/* Center circle hub */}
-        <View
-          style={{
-            width: 4,
-            height: 4,
-            backgroundColor: color,
-            borderRadius: 2,
-          }}
-        />
+        <View style={[styles.gearHub, { backgroundColor: color }]} />
       </View>
       {/* 4 Gear Teeth Cross */}
-      <View
-        style={{
-          position: 'absolute',
-          width: 17,
-          height: 2,
-          backgroundColor: color,
-          borderRadius: 1,
-        }}
-      />
-      <View
-        style={{
-          position: 'absolute',
-          width: 2,
-          height: 17,
-          backgroundColor: color,
-          borderRadius: 1,
-        }}
-      />
+      <View style={[styles.gearToothHorizontal, { backgroundColor: color }]} />
+      <View style={[styles.gearToothVertical, { backgroundColor: color }]} />
     </View>
   );
 }

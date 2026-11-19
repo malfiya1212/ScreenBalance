@@ -1,5 +1,7 @@
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
+  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -7,202 +9,140 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
+import ScreenBalanceLogo from '@/components/ScreenBalanceLogo';
+import { welcomeStyles as styles } from '@/styles';
 
 export default function WelcomeScreen() {
   const router = useRouter();
-  const { user, setUser } = useApp();
+  const { user } = useApp();
   const insets = useSafeAreaInsets();
+  const [showLearnMore, setShowLearnMore] = useState(false);
 
-  const handleContinueWithGoogle = () => {
-    setUser({
-      name: 'Google User',
-      email: 'user@gmail.com',
-    });
-    router.replace('/permissions');
-  };
-
-  const bottomPadding = Math.max(insets.bottom, 20);
+  const bottomPadding = Math.max(insets.bottom, 24);
 
   return (
-    <SafeAreaView style={{ backgroundColor: '#16131D' }} className="flex-1">
+    <SafeAreaView style={styles.safeArea} className="flex-1">
       <ScrollView
-        contentContainerStyle={{
-          flexGrow: 1,
-          justifyContent: 'space-between',
-          paddingBottom: bottomPadding,
-        }}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator={false}
-        className="px-6 py-5"
+        className="px-6 py-4"
       >
-        {/* Top Branding & Logo */}
         <View className="items-center mt-3">
-          {/* Multi-color ring logo */}
-          <View className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-400 via-amber-300 to-rose-400 items-center justify-center p-[2.5px] mb-4 shadow-lg">
-            <View
-              style={{ backgroundColor: '#211C2B' }}
-              className="w-full h-full rounded-full items-center justify-center"
-            >
-              <Text className="text-xl font-black text-[#9D84D6]">✓</Text>
-            </View>
+          <View className="mb-4">
+            <ScreenBalanceLogo size={64} showGlow={true} />
           </View>
-
-          <Text className="text-3xl font-extrabold text-white tracking-tight text-center mb-1.5">
+          <Text className="text-3xl font-extrabold text-white tracking-tight text-center mb-2.5">
             ScreenBalance
           </Text>
-
-          <Text className="text-xs font-medium text-[#9E98A8] text-center px-4 leading-relaxed">
-            Track daily usage, enforce granular in-app shields, and build mindful screen balance.
+          <Text style={styles.subtitle} className="font-medium text-center px-2 max-w-[340px]">
+            Take control of your screen time, set healthy app limits, and build better digital habits.
           </Text>
         </View>
 
-        {/* Core Feature Highlights */}
-        <View className="gap-3.5 my-6">
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-3.5 rounded-2xl flex-row items-center gap-3.5"
-          >
-            <View
-              style={{ backgroundColor: '#4A3C63' }}
-              className="w-9 h-9 rounded-xl items-center justify-center"
-            >
-              <Text className="text-base">⏱️</Text>
-            </View>
-            <View className="flex-1">
-              <Text className="text-xs font-bold text-white">Usage Limits & Grouping</Text>
-              <Text className="text-[11px] text-[#9E98A8]">
-                Combine multiple apps under shared daily time caps.
-              </Text>
-            </View>
-          </View>
+        {/* Visual Hero Center Graphic */}
+        <View className="items-center justify-center my-6 flex-1">
+          <View style={styles.graphicContainer}>
+            {/* Ambient Background Glow */}
+            <View style={styles.ambientGlow} />
 
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-3.5 rounded-2xl flex-row items-center gap-3.5"
-          >
+            {/* Floating Left Badge: Clock */}
             <View
-              style={{ backgroundColor: '#4A3C63' }}
-              className="w-9 h-9 rounded-xl items-center justify-center"
+              style={styles.floatingBadgeLeft}
+              className="w-12 h-12 rounded-full border items-center justify-center"
             >
-              <Text className="text-base">🛡️</Text>
+              <Text className="text-lg">🕒</Text>
             </View>
-            <View className="flex-1">
-              <Text className="text-xs font-bold text-white">In-App Granular Blocking</Text>
-              <Text className="text-[11px] text-[#9E98A8]">
-                Block Shorts, Reels & Comments while keeping normal use.
-              </Text>
-            </View>
-          </View>
 
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-3.5 rounded-2xl flex-row items-center gap-3.5"
-          >
-            <View
-              style={{ backgroundColor: '#4A3C63' }}
-              className="w-9 h-9 rounded-xl items-center justify-center"
-            >
-              <Text className="text-base">📈</Text>
+            {/* Central Phone Mock Frame */}
+            <View style={styles.phoneFrame}>
+              {/* Phone Speaker Notch */}
+              <View style={styles.phoneNotch} />
+
+              {/* Inner Glowing Screen with Custom Logo */}
+              <View style={styles.phoneInnerScreen}>
+                <ScreenBalanceLogo size={52} showGlow={false} />
+              </View>
             </View>
-            <View className="flex-1">
-              <Text className="text-xs font-bold text-white">Interactive Line Analytics</Text>
-              <Text className="text-[11px] text-[#9E98A8]">
-                Hourly spike graphs and ranked screen breakdown.
-              </Text>
+
+            {/* Floating Right Badge: Analytics Graph */}
+            <View
+              style={styles.floatingBadgeRight}
+              className="w-12 h-12 rounded-full border items-center justify-center"
+            >
+              <Text className="text-lg">📊</Text>
             </View>
           </View>
         </View>
 
-        {/* Action Buttons: Register & Login Navigation */}
-        <View className="w-full gap-3 pt-2">
-          {user ? (
-            <Pressable
-              onPress={() => router.replace('/dashboard')}
-              accessibilityRole="button"
-              style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
-              className="w-full border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-md"
-            >
-              <Text className="text-white text-base font-extrabold tracking-wide">
-                Continue as {user.name} ➔
-              </Text>
-            </Pressable>
-          ) : (
-            <>
-              {/* Primary Action: Register */}
-              <Pressable
-                onPress={() => router.push('/register')}
-                accessibilityRole="button"
-                style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
-                className="w-full border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-md"
-              >
-                <Text className="text-white text-base font-extrabold tracking-wide">
-                  Get Started (Register) ➔
-                </Text>
-              </Pressable>
+        {/* Bottom Prominent Action Button: Get Started -> /login */}
+        <View className="w-full pt-3 pb-2">
+          <Pressable
+            onPress={() => {
+              if (user) {
+                router.replace('/dashboard');
+              } else {
+                router.push('/login');
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Get Started"
+            style={styles.primaryButton}
+            className="w-full py-4 rounded-2xl items-center justify-center active:opacity-90"
+          >
+            <Text className="text-white text-base font-extrabold tracking-wide">
+              Get Started ➔
+            </Text>
+          </Pressable>
 
-              {/* Secondary Action: Login */}
-              <Pressable
-                onPress={() => router.push('/login')}
-                accessibilityRole="button"
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="w-full border py-3.5 rounded-2xl items-center justify-center active:bg-[#2D263B]"
-              >
-                <Text className="text-white text-sm font-bold tracking-tight">
-                  I Already Have an Account (Sign In)
-                </Text>
-              </Pressable>
-
-              {/* Quick SSO: Google */}
-              <Pressable
-                onPress={handleContinueWithGoogle}
-                accessibilityRole="button"
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="w-full border py-3 rounded-2xl items-center justify-center flex-row active:bg-[#2A2436] mt-1"
-              >
-                <GoogleGLogo />
-                <Text className="text-[#9E98A8] text-xs font-semibold">
-                  Quick start with Google
-                </Text>
-              </Pressable>
-            </>
-          )}
-
-          <Text className="text-center text-[10px] text-[#7C7389] mt-1">
-            🔒 100% On-Device • No backend servers • Private to your phone
-          </Text>
+          {/* Secondary Link: Learn More */}
+          <Pressable
+            onPress={() => setShowLearnMore(true)}
+            className="py-3 items-center mt-1"
+          >
+            <Text className="text-xs font-semibold text-[#8B7BA8] active:text-white">
+              Learn More
+            </Text>
+          </Pressable>
         </View>
       </ScrollView>
-    </SafeAreaView>
-  );
-}
 
-// Google 4-Color 'G' Logo
-function GoogleGLogo() {
-  return (
-    <View className="w-4 h-4 mr-2 items-center justify-center">
-      <View
-        style={{
-          width: 15,
-          height: 15,
-          borderRadius: 7.5,
-          borderWidth: 1.8,
-          borderColor: '#4285F4',
-          borderTopColor: '#EA4335',
-          borderRightColor: '#FBBC05',
-          borderBottomColor: '#34A853',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+      {/* Learn More Modal Sheet */}
+      <Modal
+        visible={showLearnMore}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLearnMore(false)}
       >
-        <View
-          style={{
-            position: 'absolute',
-            right: -1,
-            width: 6,
-            height: 1.8,
-            backgroundColor: '#4285F4',
-          }}
-        />
-      </View>
-    </View>
+        <View className="flex-1 bg-black/75 justify-end">
+          <View style={styles.modalSheet} className="px-6 pt-5 pb-8 rounded-t-3xl">
+            <View className="items-center mb-4">
+              <View style={styles.modalHandle} className="w-10 h-1 rounded-full mb-3" />
+              <Text className="text-lg font-bold text-white">About ScreenBalance</Text>
+            </View>
+            <Text className="text-xs text-[#948BA8] leading-relaxed mb-4 text-center">
+              ScreenBalance helps you regain mindfulness over digital habits through non-invasive, 100% on-device monitoring.
+            </Text>
+            <View className="gap-2.5 mb-5">
+              <Text className="text-xs text-white">
+                🔒 <Text className="font-bold">100% Private:</Text> Your app usage data stays exclusively on your phone.
+              </Text>
+              <Text className="text-xs text-white">
+                🛡️ <Text className="font-bold">Granular Shields:</Text> Stop endless video feeds while retaining messaging.
+              </Text>
+              <Text className="text-xs text-white">
+                ⏱️ <Text className="font-bold">Shared Caps:</Text> Group distracting apps under unified budgets.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setShowLearnMore(false)}
+              style={styles.modalCloseButton}
+              className="py-3.5 rounded-xl items-center"
+            >
+              <Text className="text-white font-bold text-xs">Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }

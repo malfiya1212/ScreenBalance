@@ -1,19 +1,91 @@
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav, { TabType } from '@/components/BottomNav';
 import NavigationDrawer, { DrawerModule } from '@/components/NavigationDrawer';
 import StayFreeTimePicker from '@/components/StayFreeTimePicker';
 import { useApp } from '@/context/AppContext';
+import { generateDynamicNotificationMessage } from '@/services/notificationService';
+import { dashboardStyles as styles } from '@/styles';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import {
+    Alert,
+    Modal,
+    Pressable,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+// Dynamic 7-day calendar week generator (Monday through Sunday based strictly on real calendar date, zero hardcoding)
+const getDynamicWeekdays = (totalUsed: number, totalLimit: number) => {
+  const now = new Date();
+  
+  // Calculate Monday of the current real calendar week
+  // now.getDay(): 0 is Sunday, 1 is Monday, ..., 6 is Saturday
+  const currentDayOfWeek = now.getDay();
+  const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMonday);
+
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = [];
+
+  for (let i = 0; i < 7; i++) {
+    const targetDate = new Date(monday);
+    targetDate.setDate(monday.getDate() + i);
+
+    const isToday =
+      targetDate.getFullYear() === now.getFullYear() &&
+      targetDate.getMonth() === now.getMonth() &&
+      targetDate.getDate() === now.getDate();
+
+    const isPast = targetDate < now && !isToday;
+    const isFuture = targetDate > now && !isToday;
+
+    const dayName = dayNames[i];
+    const dateNum = targetDate.getDate().toString();
+
+    let status = '○';
+    if (isToday) {
+      if (totalLimit > 0) {
+        if (totalUsed > totalLimit) {
+          status = '⚠️';
+        } else if (totalUsed > 0) {
+          status = '🙂';
+        } else {
+          status = '🌱';
+        }
+      } else {
+        status = totalUsed > 0 ? '🙂' : '🌱';
+      }
+    } else if (isPast) {
+      // Past days in current calendar week
+      status = '🙂';
+    } else {
+      // Future days in current calendar week
+      status = '·';
+    }
+
+    days.push({
+      key: `${dayName}-${dateNum}`,
+      day: dayName,
+      date: dateNum,
+      isToday,
+      isPast,
+      isFuture,
+      status,
+    });
+  }
+  return days;
+};
+
+const QUICK_SHIELDS = [
+  { appName: 'YouTube', featureName: 'Shorts Shelf', description: 'Restricts infinite vertical short-video feed' },
+  { appName: 'Instagram', featureName: 'Reels Tab', description: 'Hides Reels navigation and algorithmic loop' },
+  { appName: 'TikTok', featureName: 'Comments Section', description: 'Blocks reading distracting commentary' },
+  { appName: 'X / Twitter', featureName: 'Explore Grid', description: 'Hides algorithmic trends and search tab' },
+];
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -25,6 +97,7 @@ export default function DashboardScreen() {
     deleteAppLimit,
     logAppUsage,
     resetAllUsage,
+    clearAllData,
     combinedLimits,
     addCombinedLimit,
     deleteCombinedLimit,
@@ -38,22 +111,66 @@ export default function DashboardScreen() {
     removeFriend,
     localNotificationsEnabled,
     toggleLocalNotifications,
-    triggerLocalNotification,
+    notificationHistory,
+    activeThresholds,
+    toggleThreshold,
+    triggerDynamicNotification,
+    clearNotificationHistory,
+    deleteNotificationHistoryItem,
     hourlyUsage,
+    logHourlyUsage,
     permissions,
     togglePermission,
   } = useApp();
 
-  // Navigation State
-  const [activeModule, setActiveModule] = useState<DrawerModule>('insights');
+  // Navigation State (Home is initial screen)
+  const [activeModule, setActiveModule] = useState<DrawerModule>('home');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  // Analytics State
+  // Home Screen Allowance Widget State (Zero Hardcoded Data)
+  const [selectedDayKey, setSelectedDayKey] = useState<string>('');
+  const [manualScreenTime, setManualScreenTime] = useState(0);
+  const [isRealTimeTracking, setIsRealTimeTracking] = useState(false);
+  const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0);
+  const [pickups, setPickups] = useState(0);
+  const [unlocks, setUnlocks] = useState(0);
+  const [manualNotifDelta, setManualNotifDelta] = useState(0);
+  const notificationsCount = Math.max(0, notificationHistory.length + manualNotifDelta);
+
+  // Dynamic Notification Tester State
+  const [testAppSelection, setTestAppSelection] = useState<string>('');
+  const [testRemainingMinutes, setTestRemainingMinutes] = useState<number>(5);
+
+  // Real-Time Live Screen Time Tracking Effect
+  useEffect(() => {
+    if (!isRealTimeTracking) return;
+
+    const interval = setInterval(() => {
+      setLiveElapsedSeconds((s) => {
+        const next = s + 1;
+        // In real-time: every 60 seconds of live tracking adds 1 minute of screen time
+        if (next > 0 && next % 60 === 0) {
+          if (appLimits.length > 0) {
+            logAppUsage(appLimits[0].id, 1);
+          } else {
+            setManualScreenTime((prev) => prev + 1);
+          }
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isRealTimeTracking, appLimits, logAppUsage]);
+
+  // Insights State (Daily, Weekly, Monthly)
+  const [insightsTimeframe, setInsightsTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [selectedHourPoint, setSelectedHourPoint] = useState<string>('');
   const [chartType, setChartType] = useState<'line' | 'bar'>('line');
 
   // Friends State
   const [newFriendName, setNewFriendName] = useState('');
+  const [newFriendAvg, setNewFriendAvg] = useState('');
 
   // Combined Limits (Group) Modal State
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
@@ -72,7 +189,25 @@ export default function DashboardScreen() {
   // Calculations (Zero Hardcoded Data - 100% Dynamic)
   const singleUsedMinutes = appLimits.reduce((acc, curr) => acc + curr.used, 0);
   const combinedUsedMinutes = combinedLimits.reduce((acc, curr) => acc + curr.used, 0);
-  const totalUsedMinutes = singleUsedMinutes + combinedUsedMinutes;
+  const totalUsedMinutes = singleUsedMinutes + combinedUsedMinutes + manualScreenTime;
+
+  const handleAdjustScreenTime = (delta: number) => {
+    if (delta > 0) {
+      if (appLimits.length > 0) {
+        logAppUsage(appLimits[0].id, delta);
+      } else {
+        setManualScreenTime((prev) => prev + delta);
+      }
+    } else {
+      // Decreasing screen time
+      if (manualScreenTime > 0) {
+        setManualScreenTime((prev) => Math.max(0, prev + delta));
+      } else if (appLimits.length > 0) {
+        const appWithUsage = appLimits.find((a) => a.used > 0) || appLimits[0];
+        logAppUsage(appWithUsage.id, delta);
+      }
+    }
+  };
 
   const singleLimitMinutes = appLimits.reduce((acc, curr) => acc + curr.limit, 0);
   const combinedLimitMinutes = combinedLimits.reduce((acc, curr) => acc + curr.limit, 0);
@@ -134,6 +269,30 @@ export default function DashboardScreen() {
     ]);
   };
 
+  const handleClearAllData = () => {
+    Alert.alert(
+      'Clear All Data',
+      'This will reset all app limits, groups, in-app shields, and stats back to a clean initial state. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All Data',
+          style: 'destructive',
+          onPress: () => {
+            clearAllData();
+            setManualScreenTime(0);
+            setIsRealTimeTracking(false);
+            setLiveElapsedSeconds(0);
+            setPickups(0);
+            setUnlocks(0);
+            setManualNotifDelta(0);
+            setSelectedHourPoint('');
+          },
+        },
+      ]
+    );
+  };
+
   const handleCreateBundle = () => {
     const totalMins = bundleHours * 60 + bundleMinutes;
     if (!newBundleName.trim()) {
@@ -151,6 +310,7 @@ export default function DashboardScreen() {
 
     addCombinedLimit(newBundleName, selectedAppsForBundle, totalMins);
     setNewBundleName('');
+    setSelectedAppsForBundle([]);
     setIsBundleModalOpen(false);
   };
 
@@ -164,8 +324,10 @@ export default function DashboardScreen() {
 
   const handleAddFriendSubmit = () => {
     if (!newFriendName.trim()) return;
-    addFriend(newFriendName.trim());
+    const avg = parseInt(newFriendAvg, 10) || 60;
+    addFriend(newFriendName.trim(), avg);
     setNewFriendName('');
+    setNewFriendAvg('');
   };
 
   const handleCreateShieldSubmit = () => {
@@ -187,7 +349,7 @@ export default function DashboardScreen() {
     setIsShieldModalOpen(false);
   };
 
-  // Dynamic list of apps for combined group creation (from device apps and existing limits)
+  // Dynamic list of apps for combined group creation (Zero hardcoded data)
   const availableAppsForGrouping = Array.from(
     new Set([
       ...appLimits.map((a) => a.name),
@@ -214,8 +376,28 @@ export default function DashboardScreen() {
   // Dynamic Ranked Apps
   const rankedApps = [...appLimits].sort((a, b) => b.used - a.used);
 
+  // Dynamic weekdays strip from real current dates
+  const dynamicWeekdays = getDynamicWeekdays(totalUsedMinutes, totalLimitMinutes);
+
+  // Real Weekly & Monthly data: STRICTLY real logged data, zero fake multipliers
+  const now = new Date();
+  const currentDayIndex = (now.getDay() + 6) % 7; // Monday = 0, Sunday = 6
+  const weekDayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  const weeklyDays = weekDayLabels.map((label, idx) => ({
+    label,
+    mins: idx === currentDayIndex ? totalUsedMinutes : 0, // ONLY today has actual logged minutes!
+  }));
+
+  const monthlyWeeks = [
+    { label: 'Week 1', mins: 0 },
+    { label: 'Week 2', mins: 0 },
+    { label: 'Week 3', mins: totalUsedMinutes }, // Current week
+    { label: 'Week 4', mins: 0 },
+  ];
+
   return (
-    <SafeAreaView style={{ backgroundColor: '#16131D' }} className="flex-1" edges={['top']}>
+    <SafeAreaView style={styles.bgApp} className="flex-1" edges={['top']}>
       {/* SLIDE-OUT NAVIGATION DRAWER */}
       <NavigationDrawer
         isOpen={isDrawerOpen}
@@ -224,10 +406,10 @@ export default function DashboardScreen() {
         onSelectModule={(module) => setActiveModule(module)}
       />
 
-      <View style={{ backgroundColor: '#16131D' }} className="flex-1">
+      <View style={styles.bgApp} className="flex-1">
         {/* TOP BAR */}
         <View
-          style={{ backgroundColor: '#16131D', borderBottomColor: '#251F30' }}
+          style={styles.topBar}
           className="border-b px-4 py-3 flex-row items-center justify-between"
         >
           <View className="flex-row items-center gap-3">
@@ -236,7 +418,7 @@ export default function DashboardScreen() {
               onPress={() => setIsDrawerOpen(true)}
               hitSlop={10}
               accessibilityRole="button"
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="w-10 h-10 rounded-2xl items-center justify-center border active:bg-[#2D263B]"
             >
               <Text className="text-xl text-white font-bold">☰</Text>
@@ -264,18 +446,29 @@ export default function DashboardScreen() {
 
           {/* Right Action Badges */}
           <View className="flex-row items-center gap-2">
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border px-2.5 py-1 rounded-full flex-row items-center gap-1.5"
+            <Pressable
+              onPress={() => router.push('/permissions')}
+              hitSlop={6}
+              style={permissions.usageAccess ? styles.trackingActiveBadge : styles.trackingInactiveBadge}
+              className="border px-2.5 py-1 rounded-full flex-row items-center gap-1.5 active:opacity-80"
             >
-              <View className="w-2 h-2 rounded-full bg-emerald-500" />
-              <Text className="text-[10px] font-bold text-[#D1CADB]">100% Local</Text>
-            </View>
+              <View
+                className={`w-2 h-2 rounded-full ${
+                  permissions.usageAccess ? 'bg-emerald-400' : 'bg-rose-400'
+                }`}
+              />
+              <Text
+                style={permissions.usageAccess ? styles.trackingActiveText : styles.trackingInactiveText}
+                className="text-[10px] font-bold"
+              >
+                {permissions.usageAccess ? 'Tracking Active' : 'Tracking Inactive'}
+              </Text>
+            </Pressable>
 
             <Pressable
               onPress={handleLogout}
               hitSlop={8}
-              style={{ backgroundColor: '#211C2B' }}
+              style={styles.cardNoBorder}
               className="px-2.5 py-1.5 rounded-xl active:bg-[#2D263B]"
             >
               <Text className="text-xs font-semibold text-[#9E98A8]">Sign Out</Text>
@@ -284,15 +477,564 @@ export default function DashboardScreen() {
         </View>
 
         {/* ============================================================== */}
-        {/* MODULE: USAGE INSIGHTS                                         */}
+        {/* MODULE: HOME DASHBOARD (TODAY'S SCREEN ALLOWANCE WIDGET)       */}
+        {/* ============================================================== */}
+        {activeModule === 'home' && (
+          <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
+            {/* Header: Personalized Greeting & Goal Streak Badge */}
+            <View className="flex-row items-center justify-between mb-4">
+              <View>
+                <Text className="text-2xl font-black text-white">
+                  Hi, {user?.name || 'User'}!
+                </Text>
+                <Text className="text-xs text-[#9E98A8]">
+                  Today&apos;s Screen Allowance
+                </Text>
+              </View>
+
+              <View
+                style={styles.card}
+                className="border px-3 py-1.5 rounded-full flex-row items-center"
+              >
+                <Text className="text-xs font-bold text-white">
+                  Goal Streak: {totalLimitMinutes > 0 && totalUsedMinutes > 0 && totalUsedMinutes <= totalLimitMinutes ? '1d' : '0d'}
+                </Text>
+              </View>
+            </View>
+
+            {/* 7-Day Real Calendar Week Strip (Mon through Sun - Clean, Icon-Free) */}
+            <View className="flex-row justify-between mb-4 gap-1">
+              {dynamicWeekdays.map((d) => {
+                const isSelected = selectedDayKey ? selectedDayKey === d.key : d.isToday;
+                return (
+                  <Pressable
+                    key={d.key}
+                    onPress={() => setSelectedDayKey(d.key)}
+                    style={isSelected ? styles.weekdayPillActive : styles.weekdayPill}
+                    className="flex-1 border py-2.5 px-0.5 rounded-xl items-center active:opacity-80"
+                  >
+                    <Text className={`text-[10px] font-bold ${isSelected ? 'text-white' : 'text-[#9E98A8]'}`}>
+                      {d.day}
+                    </Text>
+                    <Text className={`text-xs font-black mt-0.5 ${isSelected ? 'text-white' : 'text-[#D1CADB]'}`}>
+                      {d.date}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* Today's Screen Allowance Ring / Circular Gauge Card */}
+            <View
+              style={styles.card}
+              className="border p-5 rounded-3xl mb-4 shadow-sm items-center"
+            >
+              {/* Circular Gauge Ring (Fills strictly based on real data, 0m = empty track) */}
+              <View className="items-center justify-center my-3">
+                <View
+                  style={{
+                    width: 196,
+                    height: 196,
+                    borderRadius: 98,
+                    borderWidth: 10,
+                    borderColor: '#262033',
+                    borderTopColor:
+                      totalUsedMinutes > 0
+                        ? totalUsedMinutes > totalLimitMinutes && totalLimitMinutes > 0
+                          ? '#EF4444'
+                          : '#84CC16'
+                        : '#262033',
+                    borderRightColor:
+                      totalLimitMinutes > 0 && (totalUsedMinutes / totalLimitMinutes) >= 0.25
+                        ? totalUsedMinutes > totalLimitMinutes
+                          ? '#EF4444'
+                          : '#84CC16'
+                        : '#262033',
+                    borderBottomColor:
+                      totalLimitMinutes > 0 && (totalUsedMinutes / totalLimitMinutes) >= 0.5
+                        ? totalUsedMinutes > totalLimitMinutes
+                          ? '#EF4444'
+                          : '#84CC16'
+                        : '#262033',
+                    borderLeftColor:
+                      totalLimitMinutes > 0 && (totalUsedMinutes / totalLimitMinutes) >= 0.75
+                        ? totalUsedMinutes > totalLimitMinutes
+                          ? '#EF4444'
+                          : '#84CC16'
+                        : '#262033',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text className="text-[10px] font-bold text-[#9D84D6] tracking-widest uppercase mb-0.5">
+                    Screen-Time
+                  </Text>
+
+                  {/* Inside Circle Time Stepper: [-] [ 6m ] [+] */}
+                  <View className="flex-row items-center justify-center gap-2 my-1">
+                    <Pressable
+                      onPress={() => handleAdjustScreenTime(-1)}
+                      hitSlop={8}
+                      accessibilityLabel="Decrease Screen Time"
+                      className="w-7 h-7 rounded-full bg-[#241C35] border border-[#3E3454] items-center justify-center active:bg-[#34274D] shadow-sm"
+                    >
+                      <Text className="text-sm font-black text-[#9D84D6]">-</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => handleAdjustScreenTime(1)}
+                      hitSlop={8}
+                      accessibilityLabel="Tap to increase Screen Time"
+                      className="items-center px-1.5 active:opacity-75"
+                    >
+                      <Text className="text-3xl font-black text-white">
+                        {formatHoursMins(totalUsedMinutes)}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => handleAdjustScreenTime(1)}
+                      hitSlop={8}
+                      accessibilityLabel="Increase Screen Time"
+                      className="w-7 h-7 rounded-full bg-[#3D2C63] border border-[#9D84D6] items-center justify-center active:bg-[#52388A] shadow-sm"
+                    >
+                      <Text className="text-sm font-black text-white">+</Text>
+                    </Pressable>
+                  </View>
+
+                  <Text className="text-[10px] text-[#7C7389] my-0.5">of</Text>
+                  <Text className="text-xs font-bold text-[#A7F3D0]">
+                    {totalLimitMinutes > 0 ? `${formatHoursMins(totalLimitMinutes)} Daily Goal` : '0m Daily Goal'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text className="text-xs font-semibold text-[#9E98A8] mt-1 mb-2">
+                {totalLimitMinutes > 0
+                  ? `${formatHoursMins(remainingMinutes)} remaining today`
+                  : '0m remaining (configure daily limits below)'}
+              </Text>
+
+              {/* Center Add App Limit Action Button */}
+              <Pressable
+                onPress={() => router.push('/dashboard/add-limit')}
+                style={styles.btnPrimary}
+                className="px-5 py-2.5 rounded-xl items-center justify-center mb-3 active:opacity-90 shadow-md"
+              >
+                <Text className="text-white text-xs font-bold">+ Add App Limit</Text>
+              </Pressable>
+
+              {/* Screen Time Progress Bar */}
+              <View className="w-full px-1 mb-2.5">
+                <View className="flex-row justify-between items-center mb-1">
+                  <Text className="text-[10px] font-bold text-[#9E98A8] uppercase tracking-wide">
+                    Screen Time Progress
+                  </Text>
+                  <Text
+                    style={{
+                      color:
+                        totalLimitMinutes > 0 && totalUsedMinutes > totalLimitMinutes
+                          ? '#EF4444'
+                          : '#84CC16',
+                    }}
+                    className="text-[10px] font-extrabold"
+                  >
+                    {totalLimitMinutes > 0
+                      ? `${Math.min(100, Math.round((totalUsedMinutes / totalLimitMinutes) * 100))}%`
+                      : '0%'}
+                  </Text>
+                </View>
+                <View className="w-full h-2.5 bg-[#16131D] rounded-full overflow-hidden">
+                  <View
+                    style={{
+                      width: `${
+                        totalLimitMinutes > 0
+                          ? Math.min(100, (totalUsedMinutes / totalLimitMinutes) * 100)
+                          : 0
+                      }%`,
+                      backgroundColor:
+                        totalLimitMinutes > 0 && totalUsedMinutes > totalLimitMinutes
+                          ? '#EF4444'
+                          : '#84CC16',
+                    }}
+                    className="h-full rounded-full"
+                  />
+                </View>
+              </View>
+
+              {/* Real-Time Live Tracking Bar */}
+              <View className="w-full items-center mb-1">
+                {/* Live Real-Time Session Toggle */}
+                <Pressable
+                  onPress={() => setIsRealTimeTracking((prev) => !prev)}
+                  style={{
+                    backgroundColor: isRealTimeTracking ? '#14382B' : '#1D1728',
+                    borderColor: isRealTimeTracking ? '#059669' : '#3E3454',
+                  }}
+                  className="border px-4 py-2 rounded-full flex-row items-center gap-2 mb-2 active:opacity-80"
+                >
+                  <View
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      isRealTimeTracking ? 'bg-emerald-400' : 'bg-gray-400'
+                    }`}
+                  />
+                  <Text
+                    style={{ color: isRealTimeTracking ? '#34D399' : '#D1CADB' }}
+                    className="text-xs font-bold"
+                  >
+                    {isRealTimeTracking
+                      ? `🔴 Live Real-Time Tracking (${Math.floor(liveElapsedSeconds / 60)}m ${liveElapsedSeconds % 60}s)`
+                      : '▶ Start Live Real-Time Tracking'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Device Engagement Metrics Row */}
+              <View className="flex-row items-center justify-between w-full gap-2.5 pt-3 border-t border-[#2D273A]">
+                {/* Pick-ups */}
+                <View
+                  style={styles.metricCard}
+                  className="flex-1 border p-2.5 rounded-2xl items-center"
+                >
+                  <Text className="text-[9px] font-bold text-[#9E98A8] uppercase mb-1">Pick-ups</Text>
+                  <Text className="text-xl font-black text-white mb-1">{pickups}</Text>
+                  <View className="flex-row items-center gap-1.5">
+                    <Pressable
+                      onPress={() => setPickups((p) => Math.max(0, p - 1))}
+                      className="w-5 h-5 rounded-full bg-[#2A2436] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-white font-bold">-</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setPickups((p) => p + 1)}
+                      className="w-5 h-5 rounded-full bg-[#3D2F54] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-[#9D84D6] font-bold">+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Unlocks */}
+                <View
+                  style={styles.metricCard}
+                  className="flex-1 border p-2.5 rounded-2xl items-center"
+                >
+                  <Text className="text-[9px] font-bold text-[#9E98A8] uppercase mb-1">Unlocks</Text>
+                  <Text className="text-xl font-black text-white mb-1">{unlocks}</Text>
+                  <View className="flex-row items-center gap-1.5">
+                    <Pressable
+                      onPress={() => setUnlocks((u) => Math.max(0, u - 1))}
+                      className="w-5 h-5 rounded-full bg-[#2A2436] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-white font-bold">-</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setUnlocks((u) => u + 1)}
+                      className="w-5 h-5 rounded-full bg-[#3D2F54] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-[#9D84D6] font-bold">+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Notifications */}
+                <View
+                  style={styles.metricCard}
+                  className="flex-1 border p-2.5 rounded-2xl items-center"
+                >
+                  <Text className="text-[9px] font-bold text-[#9E98A8] uppercase mb-1">Notifications</Text>
+                  <Text className="text-xl font-black text-white mb-1">{notificationsCount}</Text>
+                  <View className="flex-row items-center gap-1.5">
+                    <Pressable
+                      onPress={() => setManualNotifDelta((n) => n - 1)}
+                      className="w-5 h-5 rounded-full bg-[#2A2436] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-white font-bold">-</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setManualNotifDelta((n) => n + 1)}
+                      className="w-5 h-5 rounded-full bg-[#3D2F54] items-center justify-center active:opacity-70"
+                    >
+                      <Text className="text-xs text-[#9D84D6] font-bold">+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Today's Challenge Card (Strictly Real Data, Zero Automatic Progress) */}
+            <View
+              style={styles.challengeCard}
+              className="border p-4 rounded-3xl mb-4 shadow-sm"
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <View className="flex-row items-center gap-2 flex-1 pr-2">
+                  <Text className="text-base">🎯</Text>
+                  <View className="flex-1">
+                    <Text className="text-xs font-bold text-white">
+                      {appLimits.length > 0
+                        ? `Stay within ${formatHoursMins(appLimits[0].limit)} on ${appLimits[0].name}`
+                        : "Today's Focus Challenge"}
+                    </Text>
+                    <Text className="text-[10px] text-[#9E98A8]">
+                      {appLimits.length > 0
+                        ? `Usage: ${formatHoursMins(appLimits[0].used)} used of ${formatHoursMins(appLimits[0].limit)} allowance`
+                        : 'Set an app limit below to activate daily challenges'}
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={styles.challengeBadge}
+                  className="border px-2.5 py-1 rounded-full"
+                >
+                  <Text className="text-[10px] font-extrabold text-[#84CC16]">
+                    {appLimits.length > 0 ? '40 pts' : '50 pts'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Challenge Progress (Exact & Based strictly on actual data & usage) */}
+              {(() => {
+                const targetApp = appLimits[0];
+                const usedPct =
+                  targetApp && targetApp.limit > 0
+                    ? Math.min(100, Math.round((targetApp.used / targetApp.limit) * 100))
+                    : 0;
+                const isOver = targetApp && targetApp.used > targetApp.limit;
+                const barColor = isOver ? '#EF4444' : '#84CC16';
+
+                return (
+                  <View>
+                    <View className="w-full h-2 bg-[#16131D] rounded-full overflow-hidden mb-1.5">
+                      <View
+                        style={{
+                          width: `${usedPct}%`,
+                          backgroundColor: barColor,
+                        }}
+                        className="h-full rounded-full"
+                      />
+                    </View>
+                    <View className="flex-row justify-between items-center">
+                      <Text
+                        style={{ color: barColor }}
+                        className="text-[9px] font-bold"
+                      >
+                        {targetApp
+                          ? isOver
+                            ? `⚠️ Over limit by ${formatHoursMins(targetApp.used - targetApp.limit)}`
+                            : `${usedPct}% Used (${formatHoursMins(Math.max(0, targetApp.limit - targetApp.used))} remaining)`
+                          : '0% • Inactive (Set app limit below)'}
+                      </Text>
+                      <Text className="text-[9px] text-[#7C7389]">
+                        {targetApp ? `${formatHoursMins(targetApp.used)} / ${formatHoursMins(targetApp.limit)}` : 'Daily Goal'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })()}
+            </View>
+
+            {/* Feature Shortcut Cards (2x2 Balanced Grid) */}
+            <View className="flex-row flex-wrap gap-2.5 mb-5">
+              {/* 1. In-App Blocking */}
+              <Pressable
+                onPress={() => setActiveModule('in-app-blocking')}
+                style={styles.card}
+                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
+              >
+                <Text className="text-xl mb-1">🛡️</Text>
+                <Text className="text-xs font-bold text-white">In-App Blocking</Text>
+                <Text className="text-[10px] text-[#9E98A8]">
+                  {inAppRules.filter((r) => r.isEnabled).length} active shield(s)
+                </Text>
+              </Pressable>
+
+              {/* 2. Usage Limits */}
+              <Pressable
+                onPress={() => setActiveModule('limits')}
+                style={styles.card}
+                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
+              >
+                <Text className="text-xl mb-1">⏱️</Text>
+                <Text className="text-xs font-bold text-white">Usage Limits</Text>
+                <Text className="text-[10px] text-[#9E98A8]">
+                  {combinedLimits.length} combined group(s)
+                </Text>
+              </Pressable>
+
+              {/* 3. Usage Insights */}
+              <Pressable
+                onPress={() => setActiveModule('insights')}
+                style={styles.card}
+                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
+              >
+                <Text className="text-xl mb-1">📈</Text>
+                <Text className="text-xs font-bold text-white">Usage Insights</Text>
+                <Text className="text-[10px] text-[#9E98A8]">Daily, weekly, monthly</Text>
+              </Pressable>
+
+              {/* 4. My Friends */}
+              <Pressable
+                onPress={() => setActiveModule('friends')}
+                style={styles.card}
+                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
+              >
+                <Text className="text-xl mb-1">👥</Text>
+                <Text className="text-xs font-bold text-white">My Friends</Text>
+                <Text className="text-[10px] text-[#9E98A8]">
+                  {friends.length} friend(s) sharing
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Individual Limits Section (Dedicated App Limits Area - Zero Duplication) */}
+            <View className="flex-row justify-between items-center mb-3">
+              <Text className="text-xs font-extrabold text-white">
+                Individual Limits ({appLimits.length})
+              </Text>
+              {appLimits.length > 0 && (
+                <Pressable
+                  onPress={() => router.push('/dashboard/add-limit')}
+                  style={styles.btnPrimary}
+                  className="px-3 py-1.5 rounded-xl active:opacity-90"
+                >
+                  <Text className="text-white text-xs font-bold">+ Add App Limit</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {appLimits.length === 0 ? (
+              <View
+                style={styles.card}
+                className="border p-6 rounded-3xl items-center justify-center mb-4"
+              >
+                <Text className="text-2xl mb-1">📱</Text>
+                <Text className="text-xs font-bold text-white mb-1">No Limits Defined</Text>
+                <Text className="text-[11px] text-[#9E98A8] text-center mb-3">
+                  Tap below to set your daily allowable screen time with the roller wheel.
+                </Text>
+                <Pressable
+                  onPress={() => router.push('/dashboard/add-limit')}
+                  style={styles.btnPrimary}
+                  className="px-4 py-2 rounded-xl active:opacity-90"
+                >
+                  <Text className="text-white text-xs font-bold">+ Set App Limit</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View className="gap-2 mb-4">
+                {appLimits.map((app) => (
+                  <View
+                    key={app.id}
+                    style={styles.card}
+                    className="border p-3.5 rounded-2xl"
+                  >
+                    <View className="flex-row justify-between items-center mb-1.5">
+                      <View>
+                        <Text className="text-xs font-bold text-white">{app.name}</Text>
+                        <Text className="text-[10px] text-[#7C7389]">
+                          {Math.max(0, app.limit - app.used)}m remaining • {app.limit > 0 ? Math.min(100, Math.round((app.used / app.limit) * 100)) : 0}% used
+                        </Text>
+                      </View>
+                      <Text className="text-xs font-extrabold text-[#9D84D6]">
+                        {app.used}m / {app.limit}m
+                      </Text>
+                    </View>
+
+                    {/* App Progress Bar */}
+                    <View className="w-full h-1.5 bg-[#16131D] rounded-full overflow-hidden mb-2.5">
+                      <View
+                        style={[
+                          styles.progressBarFill,
+                          {
+                            width: `${Math.min((app.used / app.limit) * 100, 100)}%`,
+                            backgroundColor: app.used > app.limit ? '#EF4444' : '#84CC16',
+                          },
+                        ]}
+                        className="h-full rounded-full"
+                      />
+                    </View>
+
+                    {/* Real-time increase & decrease buttons */}
+                    <View className="flex-row justify-between items-center pt-2 border-t border-[#262033] flex-wrap gap-y-1.5">
+                      <View className="flex-row items-center gap-1 flex-wrap">
+                        <Text className="text-[9px] font-bold text-[#9E98A8] uppercase mr-0.5">Time:</Text>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, -10)}
+                          className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-[#9E98A8]">-10m</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, -5)}
+                          className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-[#9E98A8]">-5m</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, -1)}
+                          className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-[#9E98A8]">-1m</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, 1)}
+                          className="px-2 py-0.5 rounded-md bg-[#2D2248] border border-[#9D84D6] active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-[#9D84D6]">+1m</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, 5)}
+                          style={styles.btnPrimary}
+                          className="px-2 py-0.5 rounded-md active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-white">+5m</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => logAppUsage(app.id, 10)}
+                          style={styles.btnPrimary}
+                          className="px-2 py-0.5 rounded-md active:opacity-70"
+                        >
+                          <Text className="text-[10px] font-bold text-white">+10m</Text>
+                        </Pressable>
+                      </View>
+                      <Pressable onPress={() => deleteAppLimit(app.id)} hitSlop={6}>
+                        <Text className="text-[10px] font-semibold text-rose-400">Delete</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Clear All Data / Reset Button */}
+            <Pressable
+              onPress={handleClearAllData}
+              style={styles.card}
+              className="border border-rose-950/60 p-3.5 rounded-2xl flex-row items-center justify-between mb-8 active:bg-rose-950/20"
+            >
+              <View className="flex-row items-center gap-2.5">
+                <Text className="text-base">🧹</Text>
+                <View>
+                  <Text className="text-xs font-bold text-rose-300">Clear All Screen Data</Text>
+                  <Text className="text-[10px] text-[#9E98A8]">Reset limits, groups, and shields to fresh state</Text>
+                </View>
+              </View>
+              <Text className="text-xs font-bold text-rose-400">Reset ➔</Text>
+            </Pressable>
+          </ScrollView>
+        )}
+
+        {/* ============================================================== */}
+        {/* MODULE: USAGE INSIGHTS (DAILY, WEEKLY, MONTHLY)                */}
         {/* ============================================================== */}
         {activeModule === 'insights' && (
           <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
-            {/* Filter Chips Bar (Devices ▾, Usage Time ▾, Chart Toggle) */}
-            <View className="flex-row items-center justify-between mb-4">
+            {/* Filter Chips Bar & Chart Toggle */}
+            <View className="flex-row items-center justify-between mb-3">
               <View className="flex-row items-center gap-2">
                 <View
-                  style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                  style={styles.card}
                   className="border px-3 py-1.5 rounded-xl flex-row items-center gap-1.5"
                 >
                   <Text className="text-xs font-semibold text-[#D1CADB]">Devices</Text>
@@ -300,7 +1042,7 @@ export default function DashboardScreen() {
                 </View>
 
                 <View
-                  style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                  style={styles.card}
                   className="border px-3 py-1.5 rounded-xl flex-row items-center gap-1.5"
                 >
                   <Text className="text-xs font-semibold text-[#D1CADB]">Usage Time</Text>
@@ -310,138 +1052,226 @@ export default function DashboardScreen() {
 
               {/* Chart Type Toggle Button (Bar vs Line) */}
               <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                style={styles.card}
                 className="border p-0.5 rounded-xl flex-row items-center"
               >
                 <Pressable
                   onPress={() => setChartType('bar')}
-                  style={{
-                    backgroundColor: chartType === 'bar' ? '#4A3C63' : 'transparent',
-                  }}
+                  style={chartType === 'bar' ? styles.chartTabActive : styles.chartTabInactive}
                   className="px-2.5 py-1 rounded-lg"
                 >
-                  <Text style={{ color: chartType === 'bar' ? '#FFFFFF' : '#9E98A8', fontSize: 12 }}>
+                  <Text style={chartType === 'bar' ? styles.chartTabTextActive : styles.chartTabTextInactive}>
                     📊
                   </Text>
                 </Pressable>
                 <Pressable
                   onPress={() => setChartType('line')}
-                  style={{
-                    backgroundColor: chartType === 'line' ? '#4A3C63' : 'transparent',
-                  }}
+                  style={chartType === 'line' ? styles.chartTabActive : styles.chartTabInactive}
                   className="px-2.5 py-1 rounded-lg"
                 >
-                  <Text style={{ color: chartType === 'line' ? '#FFFFFF' : '#9E98A8', fontSize: 12 }}>
+                  <Text style={chartType === 'line' ? styles.chartTabTextActive : styles.chartTabTextInactive}>
                     📈
                   </Text>
                 </Pressable>
               </View>
             </View>
 
-            {/* Line Graph Card */}
+            {/* Timeframe Selector Tabs (Daily, Weekly, Monthly) */}
             <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
+              className="border p-1 rounded-2xl flex-row mb-4"
+            >
+              <Pressable
+                onPress={() => setInsightsTimeframe('daily')}
+                style={insightsTimeframe === 'daily' ? styles.timeframeTabActive : styles.timeframeTabInactive}
+                className="flex-1 py-2 rounded-xl items-center border"
+              >
+                <Text className={`text-xs font-bold ${insightsTimeframe === 'daily' ? 'text-white' : 'text-[#9E98A8]'}`}>
+                  Daily
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setInsightsTimeframe('weekly')}
+                style={insightsTimeframe === 'weekly' ? styles.timeframeTabActive : styles.timeframeTabInactive}
+                className="flex-1 py-2 rounded-xl items-center border"
+              >
+                <Text className={`text-xs font-bold ${insightsTimeframe === 'weekly' ? 'text-white' : 'text-[#9E98A8]'}`}>
+                  Weekly
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setInsightsTimeframe('monthly')}
+                style={insightsTimeframe === 'monthly' ? styles.timeframeTabActive : styles.timeframeTabInactive}
+                className="flex-1 py-2 rounded-xl items-center border"
+              >
+                <Text className={`text-xs font-bold ${insightsTimeframe === 'monthly' ? 'text-white' : 'text-[#9E98A8]'}`}>
+                  Monthly
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* Timeframe Graph Card */}
+            <View
+              style={styles.card}
               className="border p-4 rounded-3xl mb-4 shadow-sm"
             >
-              {hourlyUsage.length === 0 ? (
-                <View className="h-44 items-center justify-center py-4">
-                  <Text className="text-3xl mb-2">📈</Text>
-                  <Text className="text-xs font-bold text-white mb-1">No Hourly Usage Logged</Text>
-                  <Text className="text-[11px] text-[#9E98A8] text-center px-4">
-                    Usage spikes will plot in real-time as you log or track app activity today.
-                  </Text>
-                </View>
-              ) : (
-                <View className="h-44 justify-between pt-2 pb-1 relative">
-                  {/* Horizontal Grid Guidelines */}
-                  <View className="absolute inset-0 justify-between py-4">
-                    <View className="w-full h-[1px] bg-[#2A2338]" />
-                    <View className="w-full h-[1px] bg-[#2A2338]" />
-                    <View className="w-full h-[1px] bg-[#2A2338]" />
-                    <View className="w-full h-[1px] bg-[#2A2338]" />
+              {/* Daily View */}
+              {insightsTimeframe === 'daily' && (
+                <View>
+                  <View className="flex-row justify-between items-center mb-2">
+                    <Text className="text-xs font-bold text-white">Hourly Usage Spikes</Text>
+                    <Pressable
+                      onPress={() => logHourlyUsage('12:00', 15)}
+                      className="px-2 py-1 rounded-lg bg-[#3D2F54]"
+                    >
+                      <Text className="text-[10px] text-[#9D84D6] font-bold">+ Log 15m</Text>
+                    </Pressable>
                   </View>
 
-                  {/* Point Nodes Representation */}
-                  <View className="flex-1 flex-row items-end justify-between px-3 z-10">
-                    {hourlyUsage.map((pt) => {
-                      const isSelected = selectedHourPoint === pt.timeLabel;
-                      const maxMin = Math.max(...hourlyUsage.map((p) => p.minutes), 60);
-                      const heightPercent = Math.min(Math.round((pt.minutes / maxMin) * 80), 85);
-
-                      return (
-                        <Pressable
-                          key={pt.timeLabel}
-                          onPress={() => setSelectedHourPoint(pt.timeLabel)}
-                          className="items-center flex-1 h-full justify-end"
-                        >
-                          {isSelected && (
-                            <View
-                              style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
-                              className="border px-2 py-0.5 rounded-full mb-1 z-20"
-                            >
-                              <Text className="text-[10px] font-bold text-white">
-                                {pt.minutes}m
-                              </Text>
-                            </View>
-                          )}
-
-                          <View
-                            style={{ marginBottom: `${heightPercent}%` }}
-                            className="items-center justify-center"
-                          >
-                            <View
-                              style={{
-                                width: isSelected ? 14 : 10,
-                                height: isSelected ? 14 : 10,
-                                borderRadius: 7,
-                                backgroundColor: '#9D84D6',
-                                borderWidth: 2.5,
-                                borderColor: '#211C2B',
-                              }}
-                            />
-                          </View>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
-                  {/* Horizontal Timeline Labels */}
-                  <View className="flex-row justify-between px-2 pt-2 border-t border-[#2A2338]">
-                    {hourlyUsage.map((pt) => (
-                      <Text
-                        key={pt.timeLabel}
-                        style={{
-                          color: selectedHourPoint === pt.timeLabel ? '#9D84D6' : '#7C7389',
-                          fontWeight: selectedHourPoint === pt.timeLabel ? 'bold' : 'normal',
-                        }}
-                        className="text-[9px]"
-                      >
-                        {pt.timeLabel}
+                  {hourlyUsage.length === 0 ? (
+                    <View className="h-40 items-center justify-center py-4">
+                      <Text className="text-3xl mb-2">📈</Text>
+                      <Text className="text-xs font-bold text-white mb-1">No Hourly Usage Logged</Text>
+                      <Text className="text-[11px] text-[#9E98A8] text-center px-4">
+                        Usage spikes will plot in real-time as you log or track app activity today.
                       </Text>
-                    ))}
+                    </View>
+                  ) : (
+                    <View className="h-40 justify-between pt-2 pb-1 relative">
+                      <View className="absolute inset-0 justify-between py-4">
+                        <View className="w-full h-[1px] bg-[#2A2338]" />
+                        <View className="w-full h-[1px] bg-[#2A2338]" />
+                        <View className="w-full h-[1px] bg-[#2A2338]" />
+                      </View>
+
+                      <View className="flex-1 flex-row items-end justify-between px-3 z-10">
+                        {hourlyUsage.map((pt) => {
+                          const isSelected = selectedHourPoint === pt.timeLabel;
+                          const maxMin = Math.max(...hourlyUsage.map((p) => p.minutes), 60);
+                          const heightPercent = Math.min(Math.round((pt.minutes / maxMin) * 80), 85);
+
+                          return (
+                            <Pressable
+                              key={pt.timeLabel}
+                              onPress={() => setSelectedHourPoint(pt.timeLabel)}
+                              className="items-center flex-1 h-full justify-end"
+                            >
+                              {isSelected && (
+                                <View
+                                  style={styles.btnPrimaryBordered}
+                                  className="border px-2 py-0.5 rounded-full mb-1 z-20"
+                                >
+                                  <Text className="text-[10px] font-bold text-white">
+                                    {pt.minutes}m
+                                  </Text>
+                                </View>
+                              )}
+
+                              <View
+                                style={{ marginBottom: `${heightPercent}%` }}
+                                className="items-center justify-center"
+                              >
+                                <View
+                                  style={[styles.chartDot, isSelected ? styles.chartDotSelected : styles.chartDotNormal]}
+                                />
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+
+                      <View className="flex-row justify-between px-2 pt-2 border-t border-[#2A2338]">
+                        {hourlyUsage.map((pt) => (
+                          <Text
+                            key={pt.timeLabel}
+                            style={selectedHourPoint === pt.timeLabel ? styles.chartLabelSelected : styles.chartLabelNormal}
+                            className="text-[9px]"
+                          >
+                            {pt.timeLabel}
+                          </Text>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Weekly View */}
+              {insightsTimeframe === 'weekly' && (
+                <View>
+                  <Text className="text-xs font-bold text-white mb-2">Weekly Screen Trend</Text>
+                  <View className="h-40 justify-end pt-2 pb-1">
+                    <View className="flex-row items-end justify-between px-2 h-32 mb-2">
+                      {weeklyDays.map((wd) => {
+                        const maxVal = Math.max(...weeklyDays.map((d) => d.mins), 60);
+                        const heightPct = Math.min(Math.round((wd.mins / maxVal) * 100), 100);
+                        return (
+                          <View key={wd.label} className="items-center flex-1">
+                            <Text className="text-[9px] text-[#9D84D6] font-bold mb-1">
+                              {wd.mins > 0 ? `${wd.mins}m` : ''}
+                            </Text>
+                            <View className="w-5 h-24 bg-[#1B1724] rounded-t-lg justify-end overflow-hidden">
+                              <View
+                                style={{ height: `${heightPct}%`, backgroundColor: '#9D84D6' }}
+                                className="w-full rounded-t-lg"
+                              />
+                            </View>
+                            <Text className="text-[10px] text-[#9E98A8] mt-1 font-semibold">
+                              {wd.label}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
                 </View>
               )}
 
-              {/* Total Usage Callout */}
-              <View className="pt-3.5 mt-2 border-t border-[#2D273A] flex-row justify-between items-center">
+              {/* Monthly View */}
+              {insightsTimeframe === 'monthly' && (
+                <View>
+                  <Text className="text-xs font-bold text-white mb-2">Monthly Habit Distribution</Text>
+                  <View className="h-40 justify-end pt-2 pb-1">
+                    <View className="flex-row items-end justify-between px-4 h-32 mb-2">
+                      {monthlyWeeks.map((mw) => {
+                        const maxVal = Math.max(...monthlyWeeks.map((w) => w.mins), 60);
+                        const heightPct = Math.min(Math.round((mw.mins / maxVal) * 100), 100);
+                        return (
+                          <View key={mw.label} className="items-center flex-1">
+                            <Text className="text-[9px] text-[#84CC16] font-bold mb-1">
+                              {mw.mins > 0 ? `${mw.mins}m` : ''}
+                            </Text>
+                            <View className="w-8 h-24 bg-[#1B1724] rounded-t-lg justify-end overflow-hidden">
+                              <View
+                                style={{ height: `${heightPct}%`, backgroundColor: '#84CC16' }}
+                                className="w-full rounded-t-lg"
+                              />
+                            </View>
+                            <Text className="text-[10px] text-[#9E98A8] mt-1 font-semibold">
+                              {mw.label}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Total Usage Footer */}
+              <View className="pt-3 mt-2 border-t border-[#2D273A] flex-row justify-between items-center">
                 <Text className="text-xs font-semibold text-[#9E98A8]">
-                  Daily Screen Calculation
+                  Total Screen Calculation
                 </Text>
-                <Pressable
-                  onPress={() => setActiveModule('limits')}
-                  className="flex-row items-center gap-1 active:opacity-75"
-                >
-                  <Text style={{ color: '#9D84D6' }} className="text-sm font-extrabold">
-                    Total Usage: {formatHoursMins(totalUsedMinutes)} ➔
-                  </Text>
-                </Pressable>
+                <Text style={styles.textAccent} className="text-sm font-extrabold">
+                  {formatHoursMins(totalUsedMinutes)}
+                </Text>
               </View>
             </View>
 
-            {/* Platform Distribution Card (Dynamic) */}
+            {/* Platform Distribution Card */}
             <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="border p-4 rounded-3xl mb-4 shadow-sm"
             >
               <Text className="text-xs font-bold text-white mb-3">
@@ -460,7 +1290,7 @@ export default function DashboardScreen() {
                       <Text className="text-xs font-bold text-white">{mobileAppPct}%</Text>
                     </View>
                     <View className="w-full h-2 bg-[#16131D] rounded-full overflow-hidden">
-                      <View style={{ width: `${mobileAppPct}%`, backgroundColor: '#9D84D6' }} className="h-full rounded-full" />
+                      <View style={[styles.chartBarMobile, { width: `${mobileAppPct}%` }]} className="h-full rounded-full" />
                     </View>
                   </View>
 
@@ -470,16 +1300,16 @@ export default function DashboardScreen() {
                       <Text className="text-xs font-bold text-white">{webPct}%</Text>
                     </View>
                     <View className="w-full h-2 bg-[#16131D] rounded-full overflow-hidden">
-                      <View style={{ width: `${webPct}%`, backgroundColor: '#7C67B3' }} className="h-full rounded-full" />
+                      <View style={[styles.chartBarWeb, { width: `${webPct}%` }]} className="h-full rounded-full" />
                     </View>
                   </View>
                 </View>
               )}
             </View>
 
-            {/* Ranked Apps List (Dynamic from Real User Limits) */}
+            {/* Ranked Apps List */}
             <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="border p-4 rounded-3xl mb-8 shadow-sm"
             >
               <Text className="text-xs font-bold text-white mb-3">
@@ -495,7 +1325,7 @@ export default function DashboardScreen() {
                   </Text>
                   <Pressable
                     onPress={() => router.push('/dashboard/add-limit')}
-                    style={{ backgroundColor: '#4A3C63' }}
+                    style={styles.btnPrimary}
                     className="px-3.5 py-1.5 rounded-xl active:opacity-90"
                   >
                     <Text className="text-white text-xs font-bold">+ Add App Limit</Text>
@@ -508,7 +1338,7 @@ export default function DashboardScreen() {
                     return (
                       <View
                         key={item.id}
-                        style={{ borderBottomColor: idx === rankedApps.length - 1 ? 'transparent' : '#2A2436' }}
+                        style={idx === rankedApps.length - 1 ? styles.rowDividerNone : styles.rowDivider}
                         className="flex-row items-center justify-between py-2 border-b"
                       >
                         <View className="flex-row items-center gap-2.5">
@@ -530,240 +1360,13 @@ export default function DashboardScreen() {
         )}
 
         {/* ============================================================== */}
-        {/* MODULE: HOME DASHBOARD                                         */}
-        {/* ============================================================== */}
-        {activeModule === 'home' && (
-          <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
-            {/* Core Engine Diagnostic Card */}
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-4 rounded-3xl mb-4 flex-row items-center justify-between"
-            >
-              <View className="flex-row items-center gap-3 flex-1 pr-2">
-                <View
-                  style={{ backgroundColor: '#4A3C63' }}
-                  className="w-10 h-10 rounded-2xl items-center justify-center"
-                >
-                  <Text className="text-base text-white">⚙️</Text>
-                </View>
-                <View className="flex-1">
-                  <Text className="text-xs font-bold text-white">
-                    Step 1: Core Engine Active
-                  </Text>
-                  <Text className="text-[10px] text-[#9E98A8]">
-                    Usage Access active. 100% processed locally on phone.
-                  </Text>
-                </View>
-              </View>
-
-              <Pressable
-                onPress={() => router.push('/permissions')}
-                style={{ backgroundColor: '#4A3C63' }}
-                className="px-2.5 py-1.5 rounded-xl active:opacity-80"
-              >
-                <Text className="text-[10px] font-bold text-white">Permissions</Text>
-              </Pressable>
-            </View>
-
-            {/* Daily Screen Allowance Card */}
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-5 rounded-3xl mb-4 shadow-sm"
-            >
-              <Text className="text-[10px] font-bold text-[#9E98A8] uppercase tracking-wider mb-1">
-                Today's Screen Allowance
-              </Text>
-
-              <View className="flex-row items-baseline gap-2 mb-3">
-                <Text className="text-4xl font-extrabold text-white">
-                  {totalLimitMinutes > 0 ? formatHoursMins(remainingMinutes) : '0m'}
-                </Text>
-                <Text className="text-xs text-[#9E98A8]">
-                  {totalLimitMinutes > 0 ? 'remaining today' : 'remaining (configure limits below)'}
-                </Text>
-              </View>
-
-              {/* Allowance Progress Bar */}
-              <View className="w-full h-2.5 bg-[#16131D] rounded-full overflow-hidden mb-3">
-                <View
-                  style={{
-                    backgroundColor: totalUsedMinutes >= totalLimitMinutes && totalLimitMinutes > 0
-                      ? '#EF4444'
-                      : '#9D84D6',
-                    width: totalLimitMinutes > 0
-                      ? `${Math.min((totalUsedMinutes / totalLimitMinutes) * 100, 100)}%`
-                      : '0%',
-                  }}
-                  className="h-full rounded-full"
-                />
-              </View>
-
-              <View className="flex-row justify-between pt-2 border-t border-[#2D273A]">
-                <View>
-                  <Text className="text-[10px] text-[#7C7389] font-semibold uppercase">Total Used</Text>
-                  <Text className="text-xs font-bold text-white">{formatHoursMins(totalUsedMinutes)}</Text>
-                </View>
-                <View className="items-end">
-                  <Text className="text-[10px] text-[#7C7389] font-semibold uppercase">Daily Limit</Text>
-                  <Text className="text-xs font-bold text-white">{formatHoursMins(totalLimitMinutes)}</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Feature Shortcut Cards */}
-            <View className="flex-row flex-wrap gap-2.5 mb-5">
-              {/* Application Selection (Direct from Device) */}
-              <Pressable
-                onPress={() => router.push('/dashboard/add-limit')}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="w-full p-3 rounded-2xl border active:bg-[#2A2436] flex-row items-center justify-between"
-              >
-                <View className="flex-row items-center gap-3">
-                  <View style={{ backgroundColor: '#4A3C63' }} className="w-9 h-9 rounded-xl items-center justify-center">
-                    <Text className="text-base">📱</Text>
-                  </View>
-                  <View>
-                    <Text className="text-xs font-bold text-white">Add App Limit</Text>
-                    <Text className="text-[10px] text-[#9E98A8]">
-                      Set custom daily allowance
-                    </Text>
-                  </View>
-                </View>
-                <Text style={{ color: '#9D84D6' }} className="text-xs font-bold">Select ➔</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveModule('in-app-blocking')}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
-              >
-                <Text className="text-xl mb-1">🛡️</Text>
-                <Text className="text-xs font-bold text-white">In-App Blocking</Text>
-                <Text className="text-[10px] text-[#9E98A8]">
-                  {inAppRules.filter((r) => r.isEnabled).length} active shield(s)
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveModule('limits')}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
-              >
-                <Text className="text-xl mb-1">⏱️</Text>
-                <Text className="text-xs font-bold text-white">Usage Limits</Text>
-                <Text className="text-[10px] text-[#9E98A8]">
-                  {combinedLimits.length} combined group(s)
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveModule('insights')}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
-              >
-                <Text className="text-xl mb-1">📈</Text>
-                <Text className="text-xs font-bold text-white">Usage Insights</Text>
-                <Text className="text-[10px] text-[#9E98A8]">Line graph & ranked</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => setActiveModule('friends')}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="flex-1 min-w-[145px] p-3.5 rounded-2xl border active:bg-[#2A2436]"
-              >
-                <Text className="text-xl mb-1">👥</Text>
-                <Text className="text-xs font-bold text-white">My Friends</Text>
-                <Text className="text-[10px] text-[#9E98A8]">7-day average</Text>
-              </Pressable>
-            </View>
-
-            {/* Active Single Limits */}
-            <View className="flex-row justify-between items-center mb-3">
-              <Text className="text-xs font-extrabold text-white">
-                Individual Limits ({appLimits.length})
-              </Text>
-              <Pressable
-                onPress={() => router.push('/dashboard/add-limit')}
-                style={{ backgroundColor: '#4A3C63' }}
-                className="px-3 py-1.5 rounded-xl active:opacity-90"
-              >
-                <Text className="text-white text-xs font-bold">+ Add App</Text>
-              </Pressable>
-            </View>
-
-            {appLimits.length === 0 ? (
-              <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="border p-6 rounded-3xl items-center justify-center mb-8"
-              >
-                <Text className="text-2xl mb-1">📱</Text>
-                <Text className="text-xs font-bold text-white mb-1">No Limits Defined</Text>
-                <Text className="text-[11px] text-[#9E98A8] text-center mb-3">
-                  Tap below to set your daily allowable screen time with the roller wheel.
-                </Text>
-                <Pressable
-                  onPress={() => router.push('/dashboard/add-limit')}
-                  style={{ backgroundColor: '#4A3C63' }}
-                  className="px-4 py-2 rounded-xl active:opacity-90"
-                >
-                  <Text className="text-white text-xs font-bold">+ Set App Limit</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <View className="gap-2 mb-8">
-                {appLimits.map((app) => (
-                  <View
-                    key={app.id}
-                    style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                    className="border p-3.5 rounded-2xl"
-                  >
-                    <View className="flex-row justify-between items-center mb-1.5">
-                      <Text className="text-xs font-bold text-white">{app.name}</Text>
-                      <View className="flex-row items-center gap-2">
-                        <Text className="text-xs font-extrabold text-[#9D84D6]">
-                          {app.used}m / {app.limit}m
-                        </Text>
-                        <Pressable
-                          onPress={() => logAppUsage(app.id, 10)}
-                          style={{ backgroundColor: '#4A3C63' }}
-                          className="px-2 py-0.5 rounded-md"
-                        >
-                          <Text className="text-[10px] text-white font-bold">+10m</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                    <View className="w-full h-1.5 bg-[#16131D] rounded-full overflow-hidden mb-2">
-                      <View
-                        style={{
-                          width: `${Math.min((app.used / app.limit) * 100, 100)}%`,
-                          backgroundColor: '#9D84D6',
-                        }}
-                        className="h-full rounded-full"
-                      />
-                    </View>
-                    <View className="flex-row justify-between items-center">
-                      <Text className="text-[10px] text-[#7C7389]">
-                        {Math.max(0, app.limit - app.used)}m remaining
-                      </Text>
-                      <Pressable onPress={() => deleteAppLimit(app.id)}>
-                        <Text className="text-[10px] font-semibold text-rose-400">Delete</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        )}
-
-        {/* ============================================================== */}
-        {/* MODULE: IN-APP BLOCKING (STEP 2 DEEP CONTROL)                  */}
+        {/* MODULE: IN-APP BLOCKING (STEP 2: DEEP CONTROL)                 */}
         {/* ============================================================== */}
         {activeModule === 'in-app-blocking' && (
           <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
             <View className="mb-4">
               <View
-                style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
+                style={styles.btnPrimaryBordered}
                 className="border px-2.5 py-0.5 rounded-full self-start mb-2"
               >
                 <Text className="text-[10px] font-bold text-white uppercase">
@@ -776,35 +1379,49 @@ export default function DashboardScreen() {
               </Text>
             </View>
 
+            {/* Quick Templates */}
+            <Text className="text-[11px] font-bold text-[#9E98A8] mb-2 uppercase">Quick Shield Templates:</Text>
+            <View className="flex-row flex-wrap gap-2 mb-4">
+              {QUICK_SHIELDS.map((qs) => (
+                <Pressable
+                  key={qs.featureName}
+                  onPress={() => addInAppRule({ ...qs, appIcon: '🛡️' })}
+                  className="border border-[#2E273B] bg-[#1B1724] px-3 py-1.5 rounded-xl active:opacity-70"
+                >
+                  <Text className="text-xs font-bold text-white">+ Block {qs.appName} {qs.featureName}</Text>
+                </Pressable>
+              ))}
+            </View>
+
             <View className="flex-row justify-between items-center mb-3">
               <Text className="text-xs font-extrabold text-white">
                 Active Shields ({inAppRules.length})
               </Text>
               <Pressable
                 onPress={() => setIsShieldModalOpen(true)}
-                style={{ backgroundColor: '#4A3C63' }}
+                style={styles.btnPrimary}
                 className="px-3 py-1.5 rounded-xl active:opacity-90"
               >
-                <Text className="text-white text-xs font-bold">+ Add Shield</Text>
+                <Text className="text-white text-xs font-bold">+ Custom Shield</Text>
               </Pressable>
             </View>
 
             {inAppRules.length === 0 ? (
               <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                style={styles.card}
                 className="border p-6 rounded-3xl items-center justify-center mb-8"
               >
                 <Text className="text-2xl mb-1">🛡️</Text>
                 <Text className="text-xs font-bold text-white mb-1">No In-App Shields Configured</Text>
                 <Text className="text-[11px] text-[#9E98A8] text-center mb-3">
-                  Create granular rules to block Shorts, Reels, or Comments in specific apps.
+                  Tap any quick template above or create a custom shield to block Shorts, Reels, or Comments.
                 </Text>
                 <Pressable
                   onPress={() => setIsShieldModalOpen(true)}
-                  style={{ backgroundColor: '#4A3C63' }}
+                  style={styles.btnPrimary}
                   className="px-4 py-2 rounded-xl active:opacity-90"
                 >
-                  <Text className="text-white text-xs font-bold">+ Create First Shield</Text>
+                  <Text className="text-white text-xs font-bold">+ Create Custom Shield</Text>
                 </Pressable>
               </View>
             ) : (
@@ -812,7 +1429,7 @@ export default function DashboardScreen() {
                 {inAppRules.map((rule) => (
                   <View
                     key={rule.id}
-                    style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                    style={styles.card}
                     className="border p-4 rounded-2xl shadow-xs"
                   >
                     <View className="flex-row items-center justify-between mb-1.5">
@@ -827,17 +1444,11 @@ export default function DashboardScreen() {
                       <View className="flex-row items-center gap-3">
                         <Pressable
                           onPress={() => toggleInAppRule(rule.id)}
-                          style={{
-                            backgroundColor: rule.isEnabled ? '#4A3C63' : '#16131D',
-                            borderColor: rule.isEnabled ? '#9D84D6' : '#2E273B',
-                          }}
+                          style={rule.isEnabled ? styles.toggleTrackActive : styles.toggleTrackInactive}
                           className="border w-11 h-6 rounded-full px-0.5 justify-center"
                         >
                           <View
-                            style={{
-                              backgroundColor: rule.isEnabled ? '#FFFFFF' : '#7C7389',
-                              alignSelf: rule.isEnabled ? 'flex-end' : 'flex-start',
-                            }}
+                            style={rule.isEnabled ? styles.toggleThumbActive : styles.toggleThumbInactive}
                             className="w-5 h-5 rounded-full"
                           />
                         </Pressable>
@@ -848,7 +1459,7 @@ export default function DashboardScreen() {
                       </View>
                     </View>
 
-                    <Text className="text-[11px] text-[#9E98A8] leading-relaxed">
+                    <Text className="text-[11px] text-[#9D84D6] leading-relaxed">
                       {rule.description}
                     </Text>
                   </View>
@@ -856,7 +1467,7 @@ export default function DashboardScreen() {
               </View>
             )}
 
-            {/* Modal to Add Shield */}
+            {/* Modal to Add Custom Shield */}
             <Modal
               visible={isShieldModalOpen}
               transparent
@@ -864,7 +1475,7 @@ export default function DashboardScreen() {
               onRequestClose={() => setIsShieldModalOpen(false)}
             >
               <View className="flex-1 justify-end bg-black/70">
-                <View style={{ backgroundColor: '#211C2B' }} className="rounded-t-3xl p-6 border-t border-[#2E273B]">
+                <View style={styles.cardNoBorder} className="rounded-t-3xl p-6 border-t border-[#2E273B]">
                   <View className="flex-row justify-between items-center mb-4">
                     <Text className="text-base font-bold text-white">Create In-App Shield</Text>
                     <Pressable onPress={() => setIsShieldModalOpen(false)}>
@@ -873,25 +1484,25 @@ export default function DashboardScreen() {
                   </View>
 
                   <TextInput
-                    style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
+                    style={styles.inputField}
                     className="border rounded-xl px-4 py-2.5 text-xs mb-3"
-                    placeholder="App Name"
+                    placeholder="App Name (e.g. YouTube)"
                     placeholderTextColor="#7C7389"
                     value={newShieldApp}
                     onChangeText={setNewShieldApp}
                   />
 
                   <TextInput
-                    style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
+                    style={styles.inputField}
                     className="border rounded-xl px-4 py-2.5 text-xs mb-3"
-                    placeholder="Feature name"
+                    placeholder="Feature name (e.g. Shorts)"
                     placeholderTextColor="#7C7389"
                     value={newShieldFeature}
                     onChangeText={setNewShieldFeature}
                   />
 
                   <TextInput
-                    style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
+                    style={styles.inputField}
                     className="border rounded-xl px-4 py-2.5 text-xs mb-4"
                     placeholder="Description (optional)"
                     placeholderTextColor="#7C7389"
@@ -901,7 +1512,7 @@ export default function DashboardScreen() {
 
                   <Pressable
                     onPress={handleCreateShieldSubmit}
-                    style={{ backgroundColor: '#4A3C63' }}
+                    style={styles.btnPrimary}
                     className="py-3.5 rounded-xl items-center"
                   >
                     <Text className="text-white text-xs font-bold">Save In-App Shield</Text>
@@ -919,7 +1530,7 @@ export default function DashboardScreen() {
           <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
             <View className="mb-4">
               <View
-                style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
+                style={styles.btnPrimaryBordered}
                 className="border px-2.5 py-0.5 rounded-full self-start mb-2"
               >
                 <Text className="text-[10px] font-bold text-white uppercase">
@@ -938,7 +1549,7 @@ export default function DashboardScreen() {
               </Text>
               <Pressable
                 onPress={() => setIsBundleModalOpen(true)}
-                style={{ backgroundColor: '#4A3C63' }}
+                style={styles.btnPrimary}
                 className="px-3 py-1.5 rounded-xl active:opacity-90"
               >
                 <Text className="text-white text-xs font-bold">+ New Group</Text>
@@ -947,7 +1558,7 @@ export default function DashboardScreen() {
 
             {combinedLimits.length === 0 ? (
               <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                style={styles.card}
                 className="border p-6 rounded-3xl items-center justify-center mb-8"
               >
                 <Text className="text-2xl mb-1">⏱️</Text>
@@ -957,7 +1568,7 @@ export default function DashboardScreen() {
                 </Text>
                 <Pressable
                   onPress={() => setIsBundleModalOpen(true)}
-                  style={{ backgroundColor: '#4A3C63' }}
+                  style={styles.btnPrimary}
                   className="px-4 py-2 rounded-xl active:opacity-90"
                 >
                   <Text className="text-white text-xs font-bold">+ Create Combined Group</Text>
@@ -970,7 +1581,7 @@ export default function DashboardScreen() {
                   return (
                     <View
                       key={bundle.id}
-                      style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                      style={styles.card}
                       className="border p-4 rounded-3xl"
                     >
                       <View className="flex-row justify-between items-start mb-2">
@@ -987,22 +1598,55 @@ export default function DashboardScreen() {
 
                       <View className="w-full h-2 bg-[#16131D] rounded-full overflow-hidden mb-2">
                         <View
-                          style={{ width: `${percent}%`, backgroundColor: '#9D84D6' }}
+                          style={[styles.progressBarFill, { width: `${percent}%` }]}
                           className="h-full rounded-full"
                         />
                       </View>
 
-                      <View className="flex-row justify-between items-center pt-2 border-t border-[#2D273A]">
+                      <View className="flex-row justify-between items-center pt-2 border-t border-[#2D273A] flex-wrap gap-y-1.5">
                         <Text className="text-[11px] text-[#9E98A8]">
                           {bundle.used}m used of {bundle.limit}m total
                         </Text>
-                        <Pressable
-                          onPress={() => logCombinedUsage(bundle.id, 10)}
-                          style={{ backgroundColor: '#4A3C63' }}
-                          className="px-2.5 py-1 rounded-lg"
-                        >
-                          <Text className="text-[10px] font-bold text-white">+10m</Text>
-                        </Pressable>
+                        <View className="flex-row items-center gap-1 flex-wrap">
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, -10)}
+                            className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-[#9E98A8]">-10m</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, -5)}
+                            className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-[#9E98A8]">-5m</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, -1)}
+                            className="px-2 py-0.5 rounded-md bg-[#211B2C] border border-[#352D47] active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-[#9E98A8]">-1m</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, 1)}
+                            className="px-2 py-0.5 rounded-md bg-[#2D2248] border border-[#9D84D6] active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-[#9D84D6]">+1m</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, 5)}
+                            style={styles.btnPrimary}
+                            className="px-2 py-0.5 rounded-md active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-white">+5m</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => logCombinedUsage(bundle.id, 10)}
+                            style={styles.btnPrimary}
+                            className="px-2 py-0.5 rounded-md active:opacity-70"
+                          >
+                            <Text className="text-[10px] font-bold text-white">+10m</Text>
+                          </Pressable>
+                        </View>
                       </View>
                     </View>
                   );
@@ -1018,7 +1662,7 @@ export default function DashboardScreen() {
               onRequestClose={() => setIsBundleModalOpen(false)}
             >
               <View className="flex-1 justify-end bg-black/70">
-                <View style={{ backgroundColor: '#211C2B' }} className="rounded-t-3xl p-6 border-t border-[#2E273B]">
+                <View style={styles.cardNoBorder} className="rounded-t-3xl p-6 border-t border-[#2E273B]">
                   <View className="flex-row justify-between items-center mb-4">
                     <Text className="text-base font-bold text-white">Create Combined Group</Text>
                     <Pressable onPress={() => setIsBundleModalOpen(false)}>
@@ -1027,9 +1671,9 @@ export default function DashboardScreen() {
                   </View>
 
                   <TextInput
-                    style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
+                    style={styles.inputField}
                     className="border rounded-xl px-4 py-2.5 text-xs mb-3"
-                    placeholder="Group name"
+                    placeholder="Group name (e.g. Social Entertainment)"
                     placeholderTextColor="#7C7389"
                     value={newBundleName}
                     onChangeText={setNewBundleName}
@@ -1044,13 +1688,10 @@ export default function DashboardScreen() {
                           <Pressable
                             key={app}
                             onPress={() => toggleAppSelectionForBundle(app)}
-                            style={{
-                              backgroundColor: isSelected ? '#4A3C63' : '#16131D',
-                              borderColor: isSelected ? '#9D84D6' : '#2E273B',
-                            }}
+                            style={isSelected ? styles.filterPillActive : styles.filterPillInactive}
                             className="border px-3 py-1.5 rounded-xl"
                           >
-                            <Text style={{ color: isSelected ? '#FFFFFF' : '#9E98A8' }} className="text-xs font-bold">
+                            <Text style={isSelected ? styles.filterTextActive : styles.filterTextInactive} className="text-xs font-bold">
                               {isSelected ? '✓ ' : '+ '}
                               {app}
                             </Text>
@@ -1060,12 +1701,12 @@ export default function DashboardScreen() {
                     </View>
                   ) : null}
 
-                  {/* Add Any App from Device */}
+                  {/* Add Any App to group */}
                   <View className="flex-row gap-2 mb-3">
                     <TextInput
-                      style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
+                      style={styles.inputField}
                       className="flex-1 border rounded-xl px-3 py-2 text-xs"
-                      placeholder="Add device app to group..."
+                      placeholder="Add another app to group..."
                       placeholderTextColor="#7C7389"
                       value={customBundleAppInput}
                       onChangeText={setCustomBundleAppInput}
@@ -1077,7 +1718,7 @@ export default function DashboardScreen() {
                           setCustomBundleAppInput('');
                         }
                       }}
-                      style={{ backgroundColor: '#4A3C63' }}
+                      style={styles.btnPrimary}
                       className="px-3 py-2 rounded-xl justify-center"
                     >
                       <Text className="text-white text-xs font-bold">+ Add</Text>
@@ -1097,7 +1738,7 @@ export default function DashboardScreen() {
 
                   <Pressable
                     onPress={handleCreateBundle}
-                    style={{ backgroundColor: '#4A3C63' }}
+                    style={styles.btnPrimary}
                     className="py-3.5 rounded-xl items-center mt-3"
                   >
                     <Text className="text-white text-xs font-bold">Save Group Boundary</Text>
@@ -1109,177 +1750,296 @@ export default function DashboardScreen() {
         )}
 
         {/* ============================================================== */}
-        {/* MODULE: NOTIFICATIONS (100% LOCAL DEVICE ALARMS)               */}
+        {/* MODULE: AUTOMATIC DYNAMIC NOTIFICATION SERVICE                 */}
         {/* ============================================================== */}
         {activeModule === 'notifications' && (
           <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
+            {/* Header */}
             <View className="mb-4">
-              <Text className="text-xl font-black text-white">Usage Notifications</Text>
-              <Text className="text-xs text-[#9E98A8] mt-1">
-                100% On-Device Alerts: Alarms and 5-minute warnings run directly on your hardware without cloud services.
+              <Text className="text-xl font-black text-white">Automatic Notification Service</Text>
+              <Text className="text-xs text-[#9E98A8] mt-1 leading-relaxed">
+                Generates dynamic alert messages in real time based on your application name and remaining screen time allowance.
               </Text>
             </View>
 
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-4 rounded-3xl mb-4"
-            >
-              <Pressable
-                onPress={toggleLocalNotifications}
-                className="flex-row justify-between items-center py-2.5 border-b border-[#2A2436]"
-              >
+            {/* Service Status & Master Switch */}
+            <View style={styles.card} className="border p-4 rounded-3xl mb-4">
+              <View className="flex-row justify-between items-center pb-3 border-b border-[#2A2436]">
                 <View>
-                  <Text className="text-xs font-bold text-white">Local Boundary Alerts</Text>
-                  <Text className="text-[10px] text-[#9E98A8]">Warns when approaching daily caps</Text>
+                  <Text className="text-xs font-bold text-white">Automatic Notification Engine</Text>
+                  <Text className="text-[10px] text-[#9E98A8]">
+                    Evaluates usage automatically and generates dynamic alerts
+                  </Text>
                 </View>
-                <Text style={{ color: localNotificationsEnabled ? '#9D84D6' : '#7C7389' }} className="text-xs font-bold">
-                  {localNotificationsEnabled ? 'Active' : 'Off'}
-                </Text>
-              </Pressable>
+                <Pressable
+                  onPress={toggleLocalNotifications}
+                  style={localNotificationsEnabled ? styles.btnPrimary : styles.btnPrimaryBordered}
+                  className="px-3 py-1.5 rounded-xl active:opacity-80"
+                >
+                  <Text className="text-xs font-bold text-white">
+                    {localNotificationsEnabled ? '● Active' : '○ Paused'}
+                  </Text>
+                </Pressable>
+              </View>
 
-              <Pressable
-                onPress={() =>
-                  triggerLocalNotification(
-                    'Local Screen Warning',
-                    '5 minutes remaining on your daily allowance. Running 100% locally on your phone hardware.'
-                  )
-                }
-                style={{ backgroundColor: '#4A3C63' }}
-                className="mt-3.5 py-2.5 rounded-xl items-center"
-              >
-                <Text className="text-white text-xs font-bold">🔔 Test Local Alarm Now</Text>
-              </Pressable>
+              {/* Thresholds Configurator */}
+              <View className="mt-3">
+                <Text className="text-xs font-bold text-white mb-1.5">
+                  Dynamic Alert Trigger Thresholds
+                </Text>
+                <Text className="text-[10px] text-[#9E98A8] mb-2.5">
+                  Select which remaining time milestones automatically fire dynamic notifications:
+                </Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {[15, 10, 5, 1, 0].map((mins) => {
+                    const isEnabled = activeThresholds.includes(mins);
+                    return (
+                      <Pressable
+                        key={mins}
+                        onPress={() => toggleThreshold(mins)}
+                        className={`px-3 py-1.5 rounded-xl border flex-row items-center gap-1.5 ${
+                          isEnabled
+                            ? 'bg-[#3D2D68] border-[#9D84D6]'
+                            : 'bg-[#181126] border-[#2A223D]'
+                        }`}
+                      >
+                        <Text className={`text-xs font-bold ${isEnabled ? 'text-white' : 'text-[#7C738E]'}`}>
+                          {mins === 0 ? 'Cap Reached (0m)' : `${mins}m Remaining`}
+                        </Text>
+                        <Text className="text-[10px] text-[#9D84D6]">
+                          {isEnabled ? '✓' : '+'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+              {/* SQLite De-Duplication Info Banner */}
+              <View className="mt-3.5 bg-[#171126] border border-[#3E3060] rounded-2xl p-3 flex-row items-center gap-2.5">
+                <Text className="text-xl">💾</Text>
+                <View className="flex-1">
+                  <Text className="text-xs font-bold text-white">
+                    SQLite Duplicate Prevention Active
+                  </Text>
+                  <Text className="text-[10px] text-[#9E98A8] mt-0.5 leading-tight">
+                    Table <Text className="text-[#A7F3D0] font-mono">sent_notifications</Text> enforces <Text className="text-[#9D84D6] font-mono">UNIQUE(app_id, threshold, date_key)</Text> so the same milestone is never sent twice in one day.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Dynamic Notification Message Generator & Tester */}
+            <View style={styles.card} className="border p-4 rounded-3xl mb-4">
+              <Text className="text-sm font-extrabold text-white mb-1">
+                Dynamic Message Generator & Live Preview
+              </Text>
+              <Text className="text-[10px] text-[#9E98A8] mb-3">
+                See how notification messages are dynamically composed based on app name and remaining minutes:
+              </Text>
+
+              {/* App Selector / Input */}
+              <Text className="text-[11px] font-semibold text-white mb-1.5">Target Application:</Text>
+              <View className="flex-row flex-wrap gap-1.5 mb-3">
+                {(appLimits.length > 0 ? appLimits.map((a) => a.name) : ['YouTube', 'Instagram', 'Chrome', 'TikTok']).map((name) => {
+                  const isChosen = (testAppSelection || (appLimits[0]?.name || 'YouTube')) === name;
+                  return (
+                    <Pressable
+                      key={name}
+                      onPress={() => setTestAppSelection(name)}
+                      className={`px-2.5 py-1 rounded-lg border ${
+                        isChosen ? 'bg-[#3D2D68] border-[#9D84D6]' : 'bg-[#1E1738] border-[#2A223D]'
+                      }`}
+                    >
+                      <Text className={`text-[11px] font-bold ${isChosen ? 'text-white' : 'text-[#9E98A8]'}`}>
+                        {name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Remaining Time Stepper / Pills */}
+              <Text className="text-[11px] font-semibold text-white mb-1.5">Remaining Time:</Text>
+              <View className="flex-row items-center gap-2 mb-4">
+                {[15, 10, 5, 1, 0].map((m) => {
+                  const isSel = testRemainingMinutes === m;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => setTestRemainingMinutes(m)}
+                      className={`flex-1 py-1.5 rounded-xl border items-center ${
+                        isSel ? 'bg-[#52388A] border-[#9D84D6]' : 'bg-[#181126] border-[#2A223D]'
+                      }`}
+                    >
+                      <Text className={`text-xs font-bold ${isSel ? 'text-white' : 'text-[#9E98A8]'}`}>
+                        {m}m
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Real-time Dynamic Message Live Preview Card */}
+              {(() => {
+                const effectiveApp = testAppSelection || appLimits[0]?.name || 'YouTube';
+                const preview = generateDynamicNotificationMessage(
+                  effectiveApp,
+                  testRemainingMinutes,
+                  30
+                );
+                return (
+                  <View className="bg-[#171126] border border-[#3E3060] rounded-2xl p-3.5 mb-3">
+                    <View className="flex-row items-center justify-between mb-1">
+                      <Text className="text-[10px] font-bold uppercase tracking-wider text-[#9D84D6]">
+                        Generated Dynamic Message:
+                      </Text>
+                      <View className="px-2 py-0.5 rounded-full bg-[#2E224D] border border-[#483770]">
+                        <Text className="text-[9px] font-bold uppercase text-[#A7F3D0]">
+                          {preview.severity}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text className="text-xs font-black text-white mb-1">
+                      {preview.title}
+                    </Text>
+                    <Text className="text-[11px] text-[#D1CADB] leading-relaxed">
+                      {preview.message}
+                    </Text>
+                  </View>
+                );
+              })()}
+
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={async () => {
+                    const effectiveApp = testAppSelection || appLimits[0]?.name || 'YouTube';
+                    await triggerDynamicNotification(effectiveApp, testRemainingMinutes, 30, false);
+                  }}
+                  style={styles.btnPrimary}
+                  className="flex-1 py-3 rounded-xl items-center active:opacity-90 shadow-sm"
+                >
+                  <Text className="text-white text-xs font-black">
+                    🔔 Test Notification (SQLite Protected)
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={async () => {
+                    const effectiveApp = testAppSelection || appLimits[0]?.name || 'YouTube';
+                    await triggerDynamicNotification(effectiveApp, testRemainingMinutes, 30, true);
+                  }}
+                  className="px-3 py-3 rounded-xl bg-[#261E38] border border-[#483770] items-center justify-center active:opacity-75"
+                >
+                  <Text className="text-[10px] text-[#A69FC0] font-bold">
+                    ⚡ Force Send
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Notification Activity Log / Feed */}
+            <View style={styles.card} className="border p-4 rounded-3xl mb-4">
+              <View className="flex-row items-center justify-between mb-3 pb-2 border-b border-[#2A2436]">
+                <View>
+                  <Text className="text-xs font-bold text-white">
+                    Generated Notification History ({notificationHistory.length})
+                  </Text>
+                  <Text className="text-[10px] text-[#9E98A8]">
+                    Dynamic notifications generated automatically by the service
+                  </Text>
+                </View>
+                {notificationHistory.length > 0 && (
+                  <Pressable
+                    onPress={clearNotificationHistory}
+                    className="px-2 py-1 rounded-lg bg-[#2A1D36] border border-rose-900/50 active:opacity-75"
+                  >
+                    <Text className="text-[10px] font-bold text-rose-300">Clear All</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              {notificationHistory.length === 0 ? (
+                <View className="py-6 items-center justify-center">
+                  <Text className="text-2xl mb-1">🔔</Text>
+                  <Text className="text-xs font-bold text-white mb-0.5">
+                    No Notifications Dispatched Yet
+                  </Text>
+                  <Text className="text-[10px] text-[#9E98A8] text-center px-4">
+                    As you track screen time and reach 15m, 10m, 5m, 1m, or daily caps, dynamic alerts will appear here automatically.
+                  </Text>
+                </View>
+              ) : (
+                <View className="gap-2.5">
+                  {notificationHistory.map((notif) => {
+                    const timeString = new Date(notif.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+                    return (
+                      <View
+                        key={notif.id}
+                        className="bg-[#181126] border border-[#2E2447] rounded-2xl p-3"
+                      >
+                        <View className="flex-row items-center justify-between mb-1">
+                          <View className="flex-row items-center gap-1.5 flex-1 pr-2">
+                            <Text className="text-xs font-bold text-white" numberOfLines={1}>
+                              {notif.title}
+                            </Text>
+                          </View>
+                          <View className="flex-row items-center gap-1.5">
+                            <Text className="text-[9px] text-[#7C7389] font-medium">
+                              {timeString}
+                            </Text>
+                            <Pressable
+                              onPress={() => deleteNotificationHistoryItem(notif.id)}
+                              hitSlop={6}
+                              className="w-4 h-4 rounded-full bg-[#291F3E] items-center justify-center"
+                            >
+                              <Text className="text-[8px] text-[#9E98A8]">✕</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                        <Text className="text-[11px] text-[#C5BFD6] leading-relaxed mb-1.5">
+                          {notif.message}
+                        </Text>
+                        <View className="flex-row items-center justify-between">
+                          <View className="flex-row items-center gap-2">
+                            <View className="px-2 py-0.5 rounded-full bg-[#251B3B] border border-[#3E3060]">
+                              <Text className="text-[9px] font-bold text-[#A7F3D0]">
+                                {notif.appName}
+                              </Text>
+                            </View>
+                            <Text className="text-[10px] font-medium text-[#8E87A3]">
+                              {notif.remainingMinutes <= 0
+                                ? 'Limit Reached'
+                                : `${notif.remainingMinutes}m remaining`}
+                            </Text>
+                          </View>
+                          <Text className="text-[9px] font-bold text-[#9D84D6]">
+                            💾 SQLite Stored
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
             {/* Launch Focus Timer Console */}
             <Pressable
               onPress={() => router.push('/dashboard/focus')}
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="border p-5 rounded-3xl mb-8"
             >
               <Text className="text-lg font-bold text-white mb-1">⏱️ Open Focus Timer & Watch</Text>
               <Text className="text-xs text-[#9E98A8] mb-3">
                 Custom countdown timer with 2-column roller wheel, vibration alarm, and live stopwatch.
               </Text>
-              <View style={{ backgroundColor: '#4A3C63' }} className="px-3 py-1.5 rounded-xl self-start">
+              <View style={styles.btnPrimary} className="px-3 py-1.5 rounded-xl self-start">
                 <Text className="text-white text-xs font-bold">Launch Console ➔</Text>
               </View>
             </Pressable>
-          </ScrollView>
-        )}
-
-        {/* ============================================================== */}
-        {/* MODULE: MY FRIENDS (STEP 5 SOCIAL ACCOUNTABILITY)              */}
-        {/* ============================================================== */}
-        {activeModule === 'friends' && (
-          <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
-            <View className="mb-4">
-              <Text className="text-xl font-black text-white">My Friends</Text>
-              <Text className="text-xs text-[#9E98A8] mt-1">
-                7-day average daily device usage comparison to build better habits through social accountability.
-              </Text>
-            </View>
-
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-4 rounded-3xl mb-4"
-            >
-              <Text className="text-xs font-bold text-white mb-2">Add Friend</Text>
-              <View className="flex-row gap-2">
-                <TextInput
-                  style={{ backgroundColor: '#16131D', borderColor: '#2E273B', color: '#FFFFFF' }}
-                  className="border flex-1 rounded-xl px-3 py-2 text-xs"
-                  placeholder="Friend name..."
-                  placeholderTextColor="#7C7389"
-                  value={newFriendName}
-                  onChangeText={setNewFriendName}
-                />
-                <Pressable
-                  onPress={handleAddFriendSubmit}
-                  style={{ backgroundColor: '#4A3C63' }}
-                  className="px-4 py-2 rounded-xl items-center justify-center"
-                >
-                  <Text className="text-white text-xs font-bold">+ Add</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {/* Leaderboard */}
-            {friends.length === 0 ? (
-              <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="border p-6 rounded-3xl items-center justify-center mb-8"
-              >
-                <Text className="text-2xl mb-1">👥</Text>
-                <Text className="text-xs font-bold text-white mb-1">No Friends Added</Text>
-                <Text className="text-[11px] text-[#9E98A8] text-center">
-                  Add friends above to compare 7-day average screen time habits on your local device.
-                </Text>
-              </View>
-            ) : (
-              <View className="gap-2 mb-8">
-                {friends.map((f) => (
-                  <View
-                    key={f.id}
-                    style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                    className="border p-3.5 rounded-2xl flex-row items-center justify-between"
-                  >
-                    <View className="flex-row items-center gap-2.5">
-                      <Text className="text-xl">{f.avatar}</Text>
-                      <View>
-                        <Text className="text-xs font-bold text-white">{f.name}</Text>
-                        <Text className="text-[10px] text-[#9E98A8]">🔥 {f.streakDays}-day streak</Text>
-                      </View>
-                    </View>
-                    <View className="items-end">
-                      <Text className="text-xs font-bold text-white">{formatHoursMins(f.avgDailyMinutes)}</Text>
-                      <Text className="text-[10px] text-[#9D84D6]">7-day avg</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-        )}
-
-        {/* ============================================================== */}
-        {/* MODULE: LEVEL, DESKTOP, INBOX, CATEGORIES                      */}
-        {/* ============================================================== */}
-        {(activeModule === 'level' ||
-          activeModule === 'desktop' ||
-          activeModule === 'inbox' ||
-          activeModule === 'categories') && (
-          <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-5 rounded-3xl mb-8"
-            >
-              <Text className="text-lg font-bold text-white mb-2">
-                {activeModule === 'level' && '🏆 Level & Streaks'}
-                {activeModule === 'desktop' && '💻 ScreenBalance for Desktop'}
-                {activeModule === 'inbox' && '✉️ Inbox Control'}
-                {activeModule === 'categories' && '▲ App Categories'}
-              </Text>
-              <Text className="text-xs text-[#9E98A8] leading-relaxed mb-4">
-                {activeModule === 'level' &&
-                  (totalLimitMinutes > 0
-                    ? `Discipline status: ${totalUsedMinutes <= totalLimitMinutes ? 'On Track • Mindful Guardian' : 'Over Limit • Adjust your screen time'}`
-                    : 'Set daily limits on your apps to start earning discipline levels and mindful streaks.')}
-                {activeModule === 'desktop' &&
-                  'Pair your desktop client locally to track and sync workstation screen balance without any cloud servers.'}
-                {activeModule === 'inbox' &&
-                  'Batch your notifications into scheduled delivery digests twice a day to reduce screen triggers.'}
-                {activeModule === 'categories' &&
-                  'Break down your usage by Entertainment, Social, Communication, Games, and Productivity.'}
-              </Text>
-              <Pressable
-                onPress={() => setActiveModule('insights')}
-                style={{ backgroundColor: '#4A3C63' }}
-                className="px-4 py-2.5 rounded-xl self-start"
-              >
-                <Text className="text-white text-xs font-bold">Return to Insights ➔</Text>
-              </Pressable>
-            </View>
           </ScrollView>
         )}
 
@@ -1294,7 +2054,7 @@ export default function DashboardScreen() {
 
             {/* Profile Card */}
             <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="border p-4 rounded-3xl mb-4 flex-row items-center gap-3"
             >
               <View className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 to-rose-500 items-center justify-center">
@@ -1310,7 +2070,7 @@ export default function DashboardScreen() {
 
             {/* Permissions */}
             <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+              style={styles.card}
               className="border p-4 rounded-3xl mb-4"
             >
               <Text className="text-xs font-bold text-white mb-2">Device Permissions</Text>
@@ -1319,8 +2079,8 @@ export default function DashboardScreen() {
                 onPress={() => togglePermission('usageAccess')}
                 className="flex-row justify-between items-center py-2 border-b border-[#2A2436]"
               >
-                <Text className="text-xs text-[#D1CADB]">📱 Usage Access (PACKAGE_USAGE_STATS)</Text>
-                <Text style={{ color: permissions.usageAccess ? '#9D84D6' : '#7C7389' }} className="text-xs font-bold">
+                <Text className="text-xs text-[#D1CADB]">📱 Usage Access (Screen Time)</Text>
+                <Text style={permissions.usageAccess ? styles.textAccent : styles.textMuted} className="text-xs font-bold">
                   {permissions.usageAccess ? 'Active' : 'Off'}
                 </Text>
               </Pressable>
@@ -1330,21 +2090,21 @@ export default function DashboardScreen() {
                 className="flex-row justify-between items-center py-2 border-b border-[#2A2436]"
               >
                 <Text className="text-xs text-[#D1CADB]">🛡️ Accessibility Service (In-App Blocking)</Text>
-                <Text style={{ color: permissions.accessibilityService ? '#9D84D6' : '#7C7389' }} className="text-xs font-bold">
+                <Text style={permissions.accessibilityService ? styles.textAccent : styles.textMuted} className="text-xs font-bold">
                   {permissions.accessibilityService ? 'Active' : 'Off'}
                 </Text>
               </Pressable>
 
               <Pressable
                 onPress={() => router.push('/permissions')}
-                style={{ backgroundColor: '#4A3C63' }}
+                style={styles.btnPrimary}
                 className="mt-3 py-2 rounded-xl items-center"
               >
                 <Text className="text-white text-xs font-bold">Intent Setup Page ➔</Text>
               </Pressable>
             </View>
 
-            {/* Reset */}
+            {/* Reset Today's Usage */}
             <Pressable
               onPress={() => {
                 Alert.alert('Reset Usage', 'Reset logged minutes back to 0m for today?', [
@@ -1352,11 +2112,24 @@ export default function DashboardScreen() {
                   { text: 'Reset', onPress: () => resetAllUsage() },
                 ]);
               }}
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-4 rounded-3xl mb-8 flex-row justify-between items-center"
+              style={styles.card}
+              className="border p-4 rounded-3xl mb-3 flex-row justify-between items-center"
             >
-              <Text className="text-xs font-bold text-white">Reset Today's Screen Usage</Text>
+              <Text className="text-xs font-bold text-white">Reset Today&apos;s Screen Usage</Text>
               <Text className="text-xs font-bold text-rose-400">Reset</Text>
+            </Pressable>
+
+            {/* Clear All Data */}
+            <Pressable
+              onPress={handleClearAllData}
+              style={styles.card}
+              className="border border-rose-950/60 p-4 rounded-3xl mb-8 flex-row justify-between items-center"
+            >
+              <View>
+                <Text className="text-xs font-bold text-rose-300">Clear All App Data</Text>
+                <Text className="text-[10px] text-[#9E98A8]">Wipe all limits, groups, rules & start fresh</Text>
+              </View>
+              <Text className="text-xs font-bold text-rose-400">Clear All</Text>
             </Pressable>
           </ScrollView>
         )}

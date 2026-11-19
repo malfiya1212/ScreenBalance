@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
+import { navigationDrawerStyles as styles } from '@/styles';
 
 export type DrawerModule =
   | 'home'
@@ -42,7 +43,7 @@ export default function NavigationDrawer({
       <View className="flex-1 flex-row bg-black/75">
         {/* Slide-out Drawer Panel (Dark Plum Background matching reference) */}
         <SafeAreaView
-          style={{ backgroundColor: '#211C2B' }}
+          style={styles.drawerPanel}
           className="w-[82%] max-w-[325px] h-full shadow-2xl justify-between"
           edges={['top', 'bottom']}
         >
@@ -198,10 +199,10 @@ export default function NavigationDrawer({
 
           {/* User Profile Card Footer matching reference exactly */}
           <View
-            style={{
-              backgroundColor: '#1A1624',
-              paddingBottom: Math.max(insets.bottom, 12) + 6,
-            }}
+            style={[
+              styles.footer,
+              { paddingBottom: Math.max(insets.bottom, 12) + 6 },
+            ]}
             className="px-4 pt-3 border-t border-[#2D273A] flex-row items-center gap-3"
           >
             {/* Custom Avatar Circle with warm illustration */}
@@ -246,27 +247,14 @@ function DrawerItem({
   return (
     <Pressable
       onPress={onPress}
-      style={{
-        backgroundColor: isActive ? '#4A3C63' : 'transparent',
-      }}
-      className={`flex-row items-center justify-between px-3.5 py-2.5 rounded-2xl active:bg-[#332A45]`}
+      style={isActive ? styles.itemActive : styles.itemInactive}
+      className="flex-row items-center justify-between px-3.5 py-2.5 rounded-2xl active:bg-[#332A45]"
     >
       <View className="flex-row items-center gap-3">
-        <Text
-          style={{
-            color: isActive ? '#FFFFFF' : '#9E98A8',
-            fontSize: 16,
-          }}
-        >
+        <Text style={isActive ? styles.iconActive : styles.iconInactive}>
           {icon}
         </Text>
-        <Text
-          style={{
-            color: isActive ? '#FFFFFF' : '#D1CADB',
-            fontWeight: isActive ? '700' : '500',
-            fontSize: 13,
-          }}
-        >
+        <Text style={isActive ? styles.labelActive : styles.labelInactive}>
           {label}
         </Text>
       </View>

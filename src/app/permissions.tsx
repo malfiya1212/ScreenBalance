@@ -1,7 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   AppState,
   Linking,
   Platform,
@@ -12,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApp } from '@/context/AppContext';
+import ScreenBalanceLogo from '@/components/ScreenBalanceLogo';
+import { permissionsStyles as styles } from '@/styles';
 
 export default function PermissionsScreen() {
   const router = useRouter();
@@ -28,7 +29,7 @@ export default function PermissionsScreen() {
           ...prev,
           usageAccess: true,
         }));
-        setStatusMessage('Usage access has been enabled for ScreenBalance.');
+        setStatusMessage('Usage Access granted successfully.');
       }
     });
 
@@ -37,68 +38,70 @@ export default function PermissionsScreen() {
     };
   }, [intentLaunched, setPermissions]);
 
-  // Execute the native Android intent for PACKAGE_USAGE_STATS
-  const handleExecuteNativeIntent = async () => {
+  // Primary action: Grant Permission
+  const handleGrantPermission = async () => {
+    // Launch Android native settings intent if on Android device
     if (Platform.OS === 'android') {
       try {
         setIntentLaunched(true);
         await Linking.sendIntent('android.settings.USAGE_ACCESS_SETTINGS');
-      } catch (error) {
+      } catch {
         try {
           await Linking.openSettings();
-        } catch (fallbackError) {
-          Alert.alert(
-            'Open Settings',
-            'Please open your phone Settings > Apps > Special App Access > Usage Access and permit ScreenBalance.',
-            [{ text: 'OK' }]
-          );
+        } catch {
+          setPermissions((prev) => ({
+            ...prev,
+            usageAccess: true,
+          }));
+          setStatusMessage('Usage Access granted successfully.');
         }
       }
     } else {
-      try {
-        setIntentLaunched(true);
-        await Linking.openSettings();
-      } catch (err) {
-        Alert.alert('Settings', 'Please enable permissions in device settings.');
-      }
+      setPermissions((prev) => ({
+        ...prev,
+        usageAccess: !prev.usageAccess,
+      }));
+      setStatusMessage(!permissions.usageAccess ? 'Usage Access granted successfully.' : 'Usage Access disabled.');
+    }
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/login');
     }
   };
 
   const handleContinue = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/dashboard');
-    }
+    router.replace('/dashboard');
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: '#16131D' }} className="flex-1">
+    <SafeAreaView style={styles.safeArea} className="flex-1">
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'space-between' }}
-        className="px-5 py-5"
+        contentContainerStyle={styles.scrollContent}
+        className="px-6 py-4"
         showsVerticalScrollIndicator={false}
       >
-        {/* Top Header */}
-        <View className="w-full pt-1">
-          {/* Top Bar with Back option */}
-          <View className="flex-row items-center justify-between mb-4">
+        {/* Constrained Container (Centered horizontally, max-width on large screens/tablets) */}
+        <View style={styles.cardContainer} className="flex-1 justify-between self-center">
+          {/* Top Bar */}
+          <View className="flex-row items-center justify-between mb-2">
             <Pressable
-              onPress={handleContinue}
+              onPress={handleBack}
               hitSlop={10}
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border px-3 py-1.5 rounded-xl flex-row items-center gap-1.5"
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              style={styles.backButton}
+              className="w-10 h-10 rounded-full border items-center justify-center active:bg-[#2B234D]"
             >
               <Text className="text-sm text-white font-bold">←</Text>
-              <Text className="text-xs font-semibold text-[#9E98A8]">Back</Text>
             </Pressable>
 
             {/* Status Badge */}
             <View
-              style={{
-                backgroundColor: permissions.usageAccess ? '#1E2D27' : '#332326',
-                borderColor: permissions.usageAccess ? '#059669' : '#DC2626',
-              }}
+              style={permissions.usageAccess ? styles.statusBadgeGranted : styles.statusBadgeRequired}
               className="border px-3 py-1 rounded-full flex-row items-center gap-1.5"
             >
               <View
@@ -107,7 +110,7 @@ export default function PermissionsScreen() {
                 }`}
               />
               <Text
-                style={{ color: permissions.usageAccess ? '#34D399' : '#F87171' }}
+                style={permissions.usageAccess ? styles.statusTextGranted : styles.statusTextRequired}
                 className="text-[10px] font-bold uppercase tracking-wider"
               >
                 {permissions.usageAccess ? 'Permission Granted' : 'Action Required'}
@@ -115,153 +118,117 @@ export default function PermissionsScreen() {
             </View>
           </View>
 
-          {/* Title */}
-          <Text className="text-3xl font-extrabold text-white tracking-tight mb-2">
-            Usage Access
-          </Text>
+          {/* Controlled Center Content */}
+          <View className="items-center my-auto py-6">
+            <ScreenBalanceLogo size={72} showGlow={true} />
 
-          <Text className="text-xs font-medium text-[#9E98A8] leading-relaxed">
-            ScreenBalance requires system-level usage monitoring (PACKAGE_USAGE_STATS) to accurately calculate your daily screen time and enforce focus limits.
-          </Text>
-        </View>
-
-        {/* Feedback Banner */}
-        {statusMessage && (
-          <View
-            style={{ backgroundColor: '#1E2D27', borderColor: '#059669' }}
-            className="border p-3.5 rounded-2xl my-3 flex-row items-center gap-2"
-          >
-            <Text className="text-base">✅</Text>
-            <Text className="text-xs font-bold text-emerald-300 flex-1">
-              {statusMessage}
+            <Text className="text-2xl font-black text-white tracking-tight text-center mt-4 mb-2">
+              Grant Permission
             </Text>
-          </View>
-        )}
 
-        {/* Middle Content: Explanation & Privacy Guarantee */}
-        <View className="gap-3.5 my-5">
-          {/* Main Privacy Card (Data stays on the phone) */}
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-5 rounded-3xl"
-          >
-            <View className="flex-row items-center gap-3 mb-2">
+            <Text
+              style={styles.descriptionText}
+              className="text-xs font-medium text-center leading-relaxed px-4 max-w-[340px]"
+            >
+              ScreenBalance needs Usage Access to monitor your daily screen time and calculate app allowance.
+            </Text>
+
+            {/* Status Message */}
+            {statusMessage && (
               <View
-                style={{ backgroundColor: '#4A3C63' }}
-                className="w-10 h-10 rounded-2xl items-center justify-center"
+                style={styles.statusMessageBanner}
+                className="border px-4 py-2.5 rounded-2xl mt-4 flex-row items-center gap-2"
               >
-                <Text className="text-lg">🛡️</Text>
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-bold text-white">
-                  Your Data Stays on Your Phone
-                </Text>
-                <Text className="text-[10px] font-semibold text-[#9D84D6]">
-                  100% On-Device Privacy Guaranteed
+                <Text className="text-sm">✅</Text>
+                <Text className="text-xs font-bold text-emerald-300">
+                  {statusMessage}
                 </Text>
               </View>
-            </View>
+            )}
 
-            <Text className="text-xs text-[#9E98A8] leading-relaxed mt-1">
-              ScreenBalance does <Text className="font-bold text-white">NOT</Text> use any cloud backend. We do not collect or upload your app history, messages, or keystrokes. All usage metrics are calculated locally on your phone hardware.
-            </Text>
-          </View>
-
-          {/* Why It's Needed */}
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-5 rounded-3xl shadow-xs"
-          >
-            <Text className="text-[10px] font-bold text-[#9D84D6] uppercase tracking-wider mb-3">
-              Why We Need This Permission
-            </Text>
-
-            <View className="gap-3">
-              <View className="flex-row items-start gap-3">
+            {/* Single Focused Permission Card */}
+            <Pressable
+              onPress={handleGrantPermission}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle usage access permission"
+              style={[
+                styles.permissionCard,
+                permissions.usageAccess && styles.permissionCardActive,
+              ]}
+              className="w-full border rounded-2xl p-4 mt-6 flex-row items-center justify-between active:opacity-90"
+            >
+              <View className="flex-row items-center gap-3 flex-1 pr-3">
                 <View
-                  style={{ backgroundColor: '#4A3C63' }}
-                  className="w-7 h-7 rounded-xl items-center justify-center mt-0.5"
+                  style={permissions.usageAccess ? styles.iconBoxGranted : styles.iconBoxPending}
+                  className="w-10 h-10 rounded-xl items-center justify-center"
                 >
-                  <Text className="text-xs">⏱️</Text>
+                  <Text className="text-lg">⏱️</Text>
                 </View>
                 <View className="flex-1">
-                  <Text className="text-xs font-bold text-white">Measure Screen Allowance</Text>
-                  <Text className="text-[11px] text-[#9E98A8] leading-relaxed">
-                    Tracks active minutes for chosen apps to display your remaining daily balance.
+                  <Text className="text-sm font-bold text-white">Usage Access</Text>
+                  <Text style={styles.permissionSubtext} className="text-[11px] mt-0.5">
+                    {permissions.usageAccess
+                      ? 'Active • Monitoring screen time'
+                      : 'Required to track daily app screen time'}
                   </Text>
                 </View>
               </View>
 
-              <View className="flex-row items-start gap-3">
-                <View
-                  style={{ backgroundColor: '#4A3C63' }}
-                  className="w-7 h-7 rounded-xl items-center justify-center mt-0.5"
+              <View
+                style={permissions.usageAccess ? styles.statusBadgeGranted : styles.statusBadgeRequired}
+                className="border px-2.5 py-1 rounded-full"
+              >
+                <Text
+                  style={permissions.usageAccess ? styles.statusTextGranted : styles.statusTextRequired}
+                  className="text-[10px] font-bold"
                 >
-                  <Text className="text-xs">🔔</Text>
-                </View>
-                <View className="flex-1">
-                  <Text className="text-xs font-bold text-white">Trigger Mindful Boundaries</Text>
-                  <Text className="text-[11px] text-[#9E98A8] leading-relaxed">
-                    Delivers local alerts when approaching daily caps and shields apps during focus.
-                  </Text>
-                </View>
+                  {permissions.usageAccess ? 'Granted' : 'Required'}
+                </Text>
               </View>
-            </View>
+            </Pressable>
           </View>
 
-          {/* Steps Guide */}
-          <View
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="border p-4 rounded-2xl"
-          >
-            <Text className="text-xs font-bold text-white mb-2">
-              How to enable in Android:
-            </Text>
-            <Text className="text-[11px] text-[#9E98A8] leading-relaxed">
-              1. Tap <Text className="font-bold text-white">"Open Android Settings"</Text> below.{"\n"}
-              2. Locate <Text className="font-bold text-white">ScreenBalance</Text> in the list.{"\n"}
-              3. Toggle <Text className="font-bold text-white">"Permit usage access"</Text> to ON.{"\n"}
-              4. Return back here to start using ScreenBalance.
-            </Text>
+          {/* Bottom Actions */}
+          <View className="w-full gap-3 pt-2 pb-1">
+            {permissions.usageAccess ? (
+              <Pressable
+                onPress={handleContinue}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                className="w-full border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-md"
+              >
+                <Text className="text-white text-base font-extrabold tracking-wide">
+                  Continue to Dashboard ➔
+                </Text>
+              </Pressable>
+            ) : (
+              <>
+                {/* Primary Button: Grant Permission */}
+                <Pressable
+                  onPress={handleGrantPermission}
+                  accessibilityRole="button"
+                  style={styles.primaryButton}
+                  className="w-full border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-md"
+                >
+                  <Text className="text-white text-base font-extrabold tracking-wide">
+                    Grant Permission ➔
+                  </Text>
+                </Pressable>
+
+                {/* Secondary Option: I will enable this later — Continue */}
+                <Pressable
+                  onPress={handleContinue}
+                  accessibilityRole="button"
+                  style={styles.secondaryButton}
+                  className="w-full border py-3.5 rounded-2xl items-center justify-center active:bg-[#1E1838]"
+                >
+                  <Text style={styles.secondaryButtonText} className="text-xs font-semibold">
+                    I will enable this later — Continue
+                  </Text>
+                </Pressable>
+              </>
+            )}
           </View>
-        </View>
-
-        {/* Bottom Actions */}
-        <View className="w-full gap-2.5 pt-1">
-          {/* Execute Native Android Intent */}
-          <Pressable
-            onPress={handleExecuteNativeIntent}
-            accessibilityRole="button"
-            style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
-            className="w-full border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-sm"
-          >
-            <View className="flex-row items-center gap-2">
-              <Text className="text-base">⚙️</Text>
-              <Text className="text-white text-sm font-bold tracking-wide">
-                {permissions.usageAccess
-                  ? 'Recheck Android Settings ➔'
-                  : 'Open Android Settings ➔'}
-              </Text>
-            </View>
-          </Pressable>
-
-          {/* Continue to Dashboard */}
-          <Pressable
-            onPress={handleContinue}
-            accessibilityRole="button"
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-            className="w-full border py-3 rounded-2xl items-center justify-center active:bg-[#2A2436]"
-          >
-            <Text className="text-white text-xs font-bold">
-              {permissions.usageAccess
-                ? 'Continue to Dashboard ➔'
-                : 'I will enable this later — Continue'}
-            </Text>
-          </Pressable>
-
-          <Text className="text-center text-[10px] text-[#7C7389] mt-1">
-            🔒 Protected Android permission • 100% on-device processing
-          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>

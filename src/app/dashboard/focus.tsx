@@ -1,16 +1,17 @@
+import StayFreeTimePicker from '@/components/StayFreeTimePicker';
+import { useApp } from '@/context/AppContext';
+import { focusStyles as styles } from '@/styles';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  Vibration,
-  View,
+    Alert,
+    Pressable,
+    ScrollView,
+    Text,
+    Vibration,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import StayFreeTimePicker from '@/components/StayFreeTimePicker';
-import { useApp } from '@/context/AppContext';
 
 export default function FocusScreen() {
   const router = useRouter();
@@ -24,9 +25,15 @@ export default function FocusScreen() {
   const [pickerMinutes, setPickerMinutes] = useState(25);
 
   // --- COUNTDOWN TIMER STATE ---
-  const [countdownSeconds, setCountdownSeconds] = useState(25 * 60);
-  const [totalTimerDuration, setTotalTimerDuration] = useState(25 * 60);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState(
+    () => (focusSession.isActive ? focusSession.remainingSeconds : 25 * 60)
+  );
+  const [, setTotalTimerDuration] = useState(
+    () => (focusSession.isActive ? focusSession.totalSeconds : 25 * 60)
+  );
+  const [isTimerRunning, setIsTimerRunning] = useState(
+    () => focusSession.isActive
+  );
   const [isAlarmRinging, setIsAlarmRinging] = useState(false);
 
   // --- STOPWATCH STATE ---
@@ -35,13 +42,15 @@ export default function FocusScreen() {
 
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    if (focusSession.isActive && !isTimerRunning) {
-      setCountdownSeconds(focusSession.remainingSeconds);
-      setTotalTimerDuration(focusSession.totalSeconds);
-      setIsTimerRunning(true);
-    }
-  }, []);
+  const triggerAlarm = () => {
+    setIsAlarmRinging(true);
+    Vibration.vibrate([0, 600, 300, 600, 300, 600, 300, 1000], true);
+
+    if (alarmIntervalRef.current) clearInterval(alarmIntervalRef.current);
+    alarmIntervalRef.current = setInterval(() => {
+      Vibration.vibrate([0, 600, 300, 600, 300, 600], false);
+    }, 2500);
+  };
 
   useEffect(() => {
     return () => {
@@ -71,17 +80,7 @@ export default function FocusScreen() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isTimerRunning, countdownSeconds]);
-
-  const triggerAlarm = () => {
-    setIsAlarmRinging(true);
-    Vibration.vibrate([0, 600, 300, 600, 300, 600, 300, 1000], true);
-
-    if (alarmIntervalRef.current) clearInterval(alarmIntervalRef.current);
-    alarmIntervalRef.current = setInterval(() => {
-      Vibration.vibrate([0, 600, 300, 600, 300, 600], false);
-    }, 2500);
-  };
+  }, [isTimerRunning, countdownSeconds, cancelFocusSession]);
 
   const stopAlarm = () => {
     setIsAlarmRinging(false);
@@ -166,14 +165,14 @@ export default function FocusScreen() {
   };
 
   return (
-    <SafeAreaView style={{ backgroundColor: '#16131D' }} className="flex-1">
+    <SafeAreaView style={styles.safeArea} className="flex-1">
       <ScrollView className="flex-1 px-5 py-4" showsVerticalScrollIndicator={false}>
         {/* Top Header */}
         <View className="flex-row items-center justify-between mb-5">
           <Pressable
             onPress={() => router.back()}
             accessibilityRole="button"
-            style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+            style={styles.backButton}
             className="border px-3 py-1.5 rounded-xl flex-row items-center gap-1.5"
           >
             <Text className="text-base text-white font-bold">←</Text>
@@ -185,25 +184,17 @@ export default function FocusScreen() {
         </View>
 
         {/* Mode Selector Pill matching reference */}
-        <View
-          style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-          className="border p-1 rounded-2xl flex-row mb-5"
-        >
+        <View style={styles.modeSelector} className="border p-1 rounded-2xl flex-row mb-5">
           <Pressable
             onPress={() => {
               if (isAlarmRinging) stopAlarm();
               setMode('timer');
             }}
-            style={{
-              backgroundColor: mode === 'timer' ? '#4A3C63' : 'transparent',
-            }}
+            style={mode === 'timer' ? styles.modeTabActive : styles.modeTab}
             className="flex-1 py-2.5 rounded-xl items-center"
           >
             <Text
-              style={{
-                color: mode === 'timer' ? '#FFFFFF' : '#9E98A8',
-                fontWeight: mode === 'timer' ? 'bold' : 'normal',
-              }}
+              style={mode === 'timer' ? styles.modeTextActive : styles.modeText}
               className="text-xs"
             >
               ⏱️ Custom Timer & Alarm
@@ -215,16 +206,11 @@ export default function FocusScreen() {
               if (isAlarmRinging) stopAlarm();
               setMode('watch');
             }}
-            style={{
-              backgroundColor: mode === 'watch' ? '#4A3C63' : 'transparent',
-            }}
+            style={mode === 'watch' ? styles.modeTabActive : styles.modeTab}
             className="flex-1 py-2.5 rounded-xl items-center"
           >
             <Text
-              style={{
-                color: mode === 'watch' ? '#FFFFFF' : '#9E98A8',
-                fontWeight: mode === 'watch' ? 'bold' : 'normal',
-              }}
+              style={mode === 'watch' ? styles.modeTextActive : styles.modeText}
               className="text-xs"
             >
               ⌚ Real Watch (Stopwatch)
@@ -234,10 +220,7 @@ export default function FocusScreen() {
 
         {/* ALARM POPUP BANNER */}
         {isAlarmRinging && (
-          <View
-            style={{ backgroundColor: '#3B1824', borderColor: '#EF4444' }}
-            className="border-2 p-5 rounded-3xl mb-5 items-center shadow-lg"
-          >
+          <View style={styles.alarmBanner} className="border-2 p-5 rounded-3xl mb-5 items-center shadow-lg">
             <Text className="text-3xl mb-1">🚨</Text>
             <Text className="text-base font-black text-rose-300 mb-1">TIME IS UP!</Text>
             <Text className="text-xs text-rose-200 text-center mb-3">
@@ -245,7 +228,7 @@ export default function FocusScreen() {
             </Text>
             <Pressable
               onPress={stopAlarm}
-              style={{ backgroundColor: '#EF4444' }}
+              style={styles.alarmStopButton}
               className="px-6 py-2.5 rounded-xl active:opacity-90"
             >
               <Text className="text-white text-xs font-bold">Stop Alarm</Text>
@@ -257,11 +240,8 @@ export default function FocusScreen() {
         {mode === 'timer' && (
           <View>
             {/* Clock Card */}
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-7 rounded-3xl items-center justify-center mb-4 shadow-sm"
-            >
-              <Text style={{ color: '#9D84D6' }} className="text-5xl font-black tracking-tight mb-2">
+            <View style={styles.displayCard} className="border p-7 rounded-3xl items-center justify-center mb-4 shadow-sm">
+              <Text style={styles.displayDigits} className="text-5xl font-black tracking-tight mb-2">
                 {formatTimerDisplay(countdownSeconds)}
               </Text>
               <Text className="text-xs font-semibold text-[#9E98A8]">
@@ -271,15 +251,12 @@ export default function FocusScreen() {
 
             {/* StayFree 2-Column Wheel Picker (Hours & Minutes) */}
             {!isTimerRunning && (
-              <View
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-                className="border p-4 rounded-3xl mb-5"
-              >
+              <View style={styles.pickerCard} className="border p-4 rounded-3xl mb-5">
                 <View className="flex-row justify-between items-center mb-2 px-1">
                   <Text className="text-xs font-bold text-white">
                     Set Focus Duration:
                   </Text>
-                  <Text style={{ color: '#9D84D6' }} className="text-xs font-bold">
+                  <Text style={styles.durationValue} className="text-xs font-bold">
                     {pickerHours > 0 ? `${pickerHours}h ` : ''}
                     {pickerMinutes}m
                   </Text>
@@ -304,7 +281,7 @@ export default function FocusScreen() {
               {!isTimerRunning ? (
                 <Pressable
                   onPress={handleStartTimer}
-                  style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
+                  style={styles.actionButtonPrimary}
                   className="flex-1 border py-4 rounded-2xl items-center justify-center active:opacity-90 shadow-sm"
                 >
                   <Text className="text-white text-sm font-bold tracking-wide">
@@ -314,7 +291,7 @@ export default function FocusScreen() {
               ) : (
                 <Pressable
                   onPress={handlePauseTimer}
-                  style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                  style={styles.actionButtonSecondary}
                   className="flex-1 border py-4 rounded-2xl items-center justify-center active:bg-[#2A2436]"
                 >
                   <Text className="text-white text-sm font-bold tracking-wide">
@@ -325,7 +302,7 @@ export default function FocusScreen() {
 
               <Pressable
                 onPress={handleResetTimer}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                style={styles.resetButton}
                 className="border px-5 py-4 rounded-2xl items-center justify-center active:bg-[#2A2436]"
               >
                 <Text className="text-rose-400 text-xs font-bold">Reset</Text>
@@ -337,11 +314,8 @@ export default function FocusScreen() {
         {/* MODE 2: STOPWATCH */}
         {mode === 'watch' && (
           <View>
-            <View
-              style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
-              className="border p-8 rounded-3xl items-center justify-center mb-5 shadow-sm"
-            >
-              <Text style={{ color: '#9D84D6' }} className="text-5xl font-black tracking-tight mb-2">
+            <View style={styles.displayCard} className="border p-8 rounded-3xl items-center justify-center mb-5 shadow-sm">
+              <Text style={styles.displayDigits} className="text-5xl font-black tracking-tight mb-2">
                 {formatStopwatchDisplay(stopwatchSeconds)}
               </Text>
               <Text className="text-xs font-semibold text-[#9E98A8]">
@@ -353,7 +327,7 @@ export default function FocusScreen() {
               {!isWatchRunning ? (
                 <Pressable
                   onPress={() => setIsWatchRunning(true)}
-                  style={{ backgroundColor: '#4A3C63', borderColor: '#9D84D6' }}
+                  style={styles.actionButtonPrimary}
                   className="flex-1 border py-4 rounded-2xl items-center justify-center active:opacity-90"
                 >
                   <Text className="text-white text-sm font-bold tracking-wide">
@@ -363,7 +337,7 @@ export default function FocusScreen() {
               ) : (
                 <Pressable
                   onPress={() => setIsWatchRunning(false)}
-                  style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                  style={styles.actionButtonSecondary}
                   className="flex-1 border py-4 rounded-2xl items-center justify-center active:bg-[#2A2436]"
                 >
                   <Text className="text-white text-sm font-bold tracking-wide">
@@ -377,7 +351,7 @@ export default function FocusScreen() {
                   setIsWatchRunning(false);
                   setStopwatchSeconds(0);
                 }}
-                style={{ backgroundColor: '#211C2B', borderColor: '#2E273B' }}
+                style={styles.resetButton}
                 className="border px-5 py-4 rounded-2xl items-center justify-center active:bg-[#2A2436]"
               >
                 <Text className="text-rose-400 text-xs font-bold">Reset</Text>
