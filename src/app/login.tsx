@@ -268,7 +268,7 @@ export default function LoginScreen() {
               <View className="w-full gap-2.5 pt-3">
                 <View className="flex-row items-center my-2">
                   <View style={styles.dividerLine} className="flex-1 h-[1px]" />
-                  <Text className="text-[11px] font-bold text-[#7E7599] px-3 uppercase tracking-wider">
+                  <Text className="text-xs font-bold text-[#7E7599] px-3 uppercase tracking-wider">
                     OR
                   </Text>
                   <View style={styles.dividerLine} className="flex-1 h-[1px]" />
@@ -290,7 +290,7 @@ export default function LoginScreen() {
             </View>
 
             {/* Footer Navigation */}
-            <View className="items-center pt-3 pb-1">
+            <View className="items-center mt-6 pt-3 pb-1">
               <Pressable
                 onPress={handleGoToRegister}
                 accessibilityRole="button"

@@ -7,6 +7,7 @@ import { navigationDrawerStyles as styles } from '@/styles';
 export type DrawerModule =
   | 'home'
   | 'limits'
+  | 'schedules'
   | 'in-app-blocking'
   | 'notifications'
   | 'level'
@@ -95,6 +96,15 @@ export default function NavigationDrawer({
                 isActive={activeModule === 'limits'}
                 onPress={() => {
                   onSelectModule('limits');
+                  onClose();
+                }}
+              />
+              <DrawerItem
+                icon="🌙"
+                label="Study & Sleep Schedules"
+                isActive={activeModule === 'schedules'}
+                onPress={() => {
+                  onSelectModule('schedules');
                   onClose();
                 }}
               />
@@ -216,7 +226,7 @@ export default function NavigationDrawer({
               <Text className="text-sm font-bold text-white tracking-tight" numberOfLines={1}>
                 {user?.name || 'Local User'}
               </Text>
-              <Text className="text-[11px] text-[#9E98A8]" numberOfLines={1}>
+              <Text className="text-xs text-[#9E98A8]" numberOfLines={1}>
                 {user?.email || 'local@screenbalance.device'}
               </Text>
             </View>
@@ -261,7 +271,7 @@ function DrawerItem({
 
       {badgeText && (
         <View className="bg-white px-2 py-0.5 rounded-full">
-          <Text className="text-[9px] font-black text-[#211C2B] uppercase">
+          <Text className="text-xs font-black text-[#211C2B] uppercase">
             {badgeText}
           </Text>
         </View>

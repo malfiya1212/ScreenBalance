@@ -25,19 +25,19 @@ export default function WelcomeScreen() {
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator={false}
-        className="px-6 py-4"
       >
-        <View className="items-center mt-3">
-          <View className="mb-4">
-            <ScreenBalanceLogo size={64} showGlow={true} />
+        <View style={styles.contentContainer}>
+          <View className="items-center mt-3">
+            <View className="mb-4">
+              <ScreenBalanceLogo size={64} showGlow={true} />
+            </View>
+            <Text className="text-3xl font-extrabold text-white tracking-tight text-center mb-2.5">
+              ScreenBalance
+            </Text>
+            <Text style={styles.subtitle} className="font-medium text-center px-2 max-w-[420px]">
+              Take control of your screen time, set healthy app limits, and build better digital habits.
+            </Text>
           </View>
-          <Text className="text-3xl font-extrabold text-white tracking-tight text-center mb-2.5">
-            ScreenBalance
-          </Text>
-          <Text style={styles.subtitle} className="font-medium text-center px-2 max-w-[340px]">
-            Take control of your screen time, set healthy app limits, and build better digital habits.
-          </Text>
-        </View>
 
         {/* Visual Hero Center Graphic */}
         <View className="items-center justify-center my-6 flex-1">
@@ -99,10 +99,11 @@ export default function WelcomeScreen() {
             onPress={() => setShowLearnMore(true)}
             className="py-3 items-center mt-1"
           >
-            <Text className="text-xs font-semibold text-[#8B7BA8] active:text-white">
+            <Text className="text-sm font-semibold text-[#8B7BA8] active:text-white">
               Learn More
             </Text>
           </Pressable>
+        </View>
         </View>
       </ScrollView>
 

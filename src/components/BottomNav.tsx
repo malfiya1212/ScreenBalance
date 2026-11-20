@@ -13,7 +13,7 @@ interface BottomNavProps {
 export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const insets = useSafeAreaInsets();
   // Safe clearance for Android 3-button navigation (||| O <) and gesture bar
-  const bottomInsetPadding = Math.max(insets.bottom, 12) + 8;
+  const bottomInsetPadding = Math.max(insets.bottom, 10) + 6;
 
   const tabs: { id: TabType; label: string }[] = [
     { id: 'home', label: 'Home' },
@@ -25,11 +25,11 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   return (
     <View
       style={[styles.container, { paddingBottom: bottomInsetPadding }]}
-      className="border-t flex-row justify-around items-center px-3"
+      className="flex-row justify-around items-center px-4"
     >
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id;
-        const color = isActive ? '#9D84D6' : '#7C7389';
+        const color = isActive ? '#A78BFA' : '#8E87A3';
 
         return (
           <Pressable
@@ -37,10 +37,10 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
             onPress={() => onTabChange(tab.id)}
             accessibilityRole="tab"
             accessibilityState={{ selected: isActive }}
-            className="items-center justify-center py-1 px-3 flex-1"
+            className="items-center justify-center py-1.5 px-3 flex-1 active:opacity-75"
           >
             {/* Render Tab Icon */}
-            <View className="w-6 h-6 items-center justify-center mb-1">
+            <View style={styles.iconBox}>
               {tab.id === 'home' && <HomeIcon color={color} />}
               {tab.id === 'reports' && <ReportsIcon color={color} />}
               {tab.id === 'schedule' && <ScheduleIcon color={color} />}
@@ -50,12 +50,17 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
             {/* Label */}
             <Text
               style={isActive ? styles.labelActive : styles.labelInactive}
-              className={`text-[11px] font-semibold tracking-tight ${
-                isActive ? 'font-bold' : ''
-              }`}
+              className="mt-1 tracking-tight"
             >
               {tab.label}
             </Text>
+
+            {/* Active Glow Pill */}
+            {isActive ? (
+              <View style={styles.activeIndicator} />
+            ) : (
+              <View style={styles.activeIndicatorPlaceholder} />
+            )}
           </Pressable>
         );
       })}
@@ -66,7 +71,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
 // 1. Home Icon (Clean outline house with door)
 function HomeIcon({ color }: { color: string }) {
   return (
-    <View className="w-5 h-5 items-center justify-end">
+    <View className="items-center justify-end">
       {/* Roof peak */}
       <View
         style={[
@@ -96,7 +101,7 @@ function HomeIcon({ color }: { color: string }) {
 // 2. Reports Icon (3 distinct bar chart columns)
 function ReportsIcon({ color }: { color: string }) {
   return (
-    <View className="w-5 h-5 flex-row items-end justify-between px-0.5 pb-0.5">
+    <View style={styles.reportsContainer}>
       <View style={[styles.barColumn, styles.barLeft, { backgroundColor: color }]} />
       <View style={[styles.barColumn, styles.barCenter, { backgroundColor: color }]} />
       <View style={[styles.barColumn, styles.barRight, { backgroundColor: color }]} />
@@ -104,29 +109,21 @@ function ReportsIcon({ color }: { color: string }) {
   );
 }
 
-// 3. Schedule Icon (Calendar with top loops and date grid)
+// 3. Schedule Icon (Calendar frame with top rings and day dots)
 function ScheduleIcon({ color }: { color: string }) {
   return (
-    <View className="w-5 h-5 items-center justify-center">
-      {/* Top hanger loops */}
-      <View className="flex-row justify-between w-3.5 mb-[-2px] z-10">
+    <View style={styles.calendarContainer}>
+      <View style={styles.calendarRingsRow}>
         <View style={[styles.hangerLoop, { backgroundColor: color }]} />
         <View style={[styles.hangerLoop, { backgroundColor: color }]} />
       </View>
-
-      {/* Calendar body */}
-      <View
-        style={[
-          styles.calendarBody,
-          { borderColor: color },
-        ]}
-      >
-        <View className="flex-row justify-around">
+      <View style={[styles.calendarBody, { borderColor: color }]}>
+        <View style={styles.calendarDotsRow}>
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
         </View>
-        <View className="flex-row justify-around">
+        <View style={styles.calendarDotsRow}>
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
           <View style={[styles.calendarDot, { backgroundColor: color }]} />
@@ -136,23 +133,15 @@ function ScheduleIcon({ color }: { color: string }) {
   );
 }
 
-// 4. Settings Icon (Gear with center hub and teeth)
+// 4. Settings Icon (Gear with hub and teeth)
 function SettingsIcon({ color }: { color: string }) {
   return (
-    <View className="w-5 h-5 items-center justify-center">
-      {/* Outer Gear Outline */}
-      <View
-        style={[
-          styles.gearOutline,
-          { borderColor: color },
-        ]}
-      >
-        {/* Center circle hub */}
-        <View style={[styles.gearHub, { backgroundColor: color }]} />
-      </View>
-      {/* 4 Gear Teeth Cross */}
+    <View style={styles.gearContainer}>
       <View style={[styles.gearToothHorizontal, { backgroundColor: color }]} />
       <View style={[styles.gearToothVertical, { backgroundColor: color }]} />
+      <View style={[styles.gearOutline, { borderColor: color }]}>
+        <View style={[styles.gearHub, { backgroundColor: color }]} />
+      </View>
     </View>
   );
 }

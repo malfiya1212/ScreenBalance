@@ -8,17 +8,47 @@ import {
   triggerHapticFeedback,
 } from '@/services/notificationService';
 import {
+  clearAllPersistedAppDataAsync,
   clearSentNotificationsAsync,
+  deletePersistedAppLimitAsync,
+  deletePersistedInAppShieldAsync,
+  deletePersistedScheduleAsync,
   deleteSentNotificationByIdAsync,
+  getDailyUsageForDateAsync,
+  getPersistedAppLimitsAsync,
+  getPersistedInAppShieldsAsync,
+  getPersistedSchedulesAsync,
+  getPersistedUsersAsync,
   getSentNotificationsAsync,
   getTodayDateKey,
   hasNotificationBeenSentAsync,
   initSqliteAsync,
+  recordDailyAppUsageAsync,
   recordSentNotificationAsync,
+  resetDailyUsageForDateAsync,
+  savePersistedAppLimitAsync,
+  savePersistedInAppShieldAsync,
+  savePersistedScheduleAsync,
+  savePersistedUserAsync,
+  ScheduleRecord,
   SentNotificationRecord,
+  togglePersistedInAppShieldAsync,
+  togglePersistedScheduleAsync,
+  UserAccountRecord,
 } from '@/services/sqliteNotificationStorage';
 
-export type { DynamicNotification, SentNotificationRecord };
+export type { DynamicNotification, ScheduleRecord, SentNotificationRecord, UserAccountRecord };
+
+export interface ScheduleItem {
+  id: string;
+  name: string;
+  type: 'study' | 'sleep' | 'focus';
+  startTime: string;
+  endTime: string;
+  daysActive: string[];
+  isEnabled: boolean;
+  blockedApps: string[];
+}
 
 export interface AppLimit {
   id: string;
@@ -39,10 +69,12 @@ export interface CombinedLimit {
 export interface InAppBlockRule {
   id: string;
   appName: string;
-  appIcon: string;
+  packageName?: string;
+  appIcon?: string;
   featureName: string;
   description: string;
   isEnabled: boolean;
+  blocksPrevented?: number;
 }
 
 export interface Friend {
@@ -131,9 +163,21 @@ interface AppContextType {
 
   // In-App Granular Blocking (Step 2)
   inAppRules: InAppBlockRule[];
-  addInAppRule: (rule: { appName: string; appIcon?: string; featureName: string; description: string }) => void;
+  addInAppRule: (rule: {
+    appName: string;
+    packageName?: string;
+    appIcon?: string;
+    featureName: string;
+    description: string;
+  }) => void;
   deleteInAppRule: (id: string) => void;
   toggleInAppRule: (id: string) => void;
+
+  // Study and Sleep Schedules (Step 8: 100% On-Device SQLite Persistent)
+  schedules: ScheduleItem[];
+  addSchedule: (schedule: Omit<ScheduleItem, 'id' | 'isEnabled'>) => Promise<void>;
+  deleteSchedule: (id: string) => Promise<void>;
+  toggleSchedule: (id: string) => Promise<void>;
 
   // Friends & Social Accountability (Step 5)
   friends: Friend[];
@@ -296,6 +340,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const updated = [...registeredUsers, newUser];
     saveUsers(updated);
 
+    // Persist to SQLite user_accounts database
+    savePersistedUserAsync({
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: newUser.name,
+      email: newUser.email,
+      password: newUser.password,
+      created_at: newUser.createdAt,
+    });
+
     // Frontend-only: Account is created, but NOT authenticated yet.
     return { success: true };
   };
@@ -351,7 +404,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Device Applications (Selected from Device, Zero Hardcoding)
   const [deviceApps, setDeviceApps] = useState<DeviceApp[]>(loadInitialDeviceApps);
 
-  const addDeviceApp = (name: string, category = 'Social', icon = '📱') => {
+  const addDeviceApp = (name: string, category = 'Social', icon = '') => {
     const formatted = name.trim();
     if (!formatted) return;
     setDeviceApps((prev) => {
@@ -402,6 +455,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // In-App Granular Blocking (Step 2: restored with clean non-image vector shields)
   const [inAppRules, setInAppRules] = useState<InAppBlockRule[]>(DEFAULT_IN_APP_RULES);
 
+  // Study & Sleep Schedules (Step 8)
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+
   // Friends & Social Accountability (Step 5: starts empty)
   const [friends, setFriends] = useState<Friend[]>([]);
 
@@ -417,14 +473,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeThresholds, setActiveThresholds] = useState<number[]>(DEFAULT_THRESHOLDS);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize SQLite database and load historical sent notifications
+  // Initialize SQLite database and hydrate all persisted relational tables
   useEffect(() => {
     let isMounted = true;
     (async () => {
       try {
         await initSqliteAsync();
-        const records = await getSentNotificationsAsync();
-        if (isMounted && records && records.length > 0) {
+        const [records, persistedLimits, todayUsage, persistedShields, persistedSchedules, persistedUsers] = await Promise.all([
+          getSentNotificationsAsync(),
+          getPersistedAppLimitsAsync(),
+          getDailyUsageForDateAsync(getTodayDateKey()),
+          getPersistedInAppShieldsAsync(),
+          getPersistedSchedulesAsync(),
+          getPersistedUsersAsync(),
+        ]);
+
+        if (!isMounted) return;
+
+        if (persistedUsers && persistedUsers.length > 0) {
+          setRegisteredUsers((prev) => {
+            const combined = [...prev];
+            for (const pu of persistedUsers) {
+              if (!combined.some((u) => u.email.toLowerCase() === pu.email.toLowerCase())) {
+                combined.push({
+                  name: pu.name,
+                  email: pu.email.toLowerCase(),
+                  password: pu.password,
+                  createdAt: pu.created_at,
+                });
+              }
+            }
+            return combined;
+          });
+        }
+
+        if (records && records.length > 0) {
           setNotificationHistory(
             records.map((r) => ({
               id: r.id,
@@ -436,6 +519,72 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               message: r.message,
               severity: r.severity as any,
               timestamp: r.sent_at,
+            }))
+          );
+        }
+
+        if (persistedLimits && persistedLimits.length > 0) {
+          // De-duplicate persisted limits by app name/id so identical keys never clash
+          const uniqueLimitsMap = new Map<string, typeof persistedLimits[0]>();
+          for (const l of persistedLimits) {
+            uniqueLimitsMap.set(l.name.toLowerCase(), l);
+          }
+          const uniqueLimits = Array.from(uniqueLimitsMap.values());
+
+          setAppLimits(
+            uniqueLimits.map((l) => {
+              const matched = todayUsage?.find(
+                (u) => u.app_id === l.id || u.app_name.toLowerCase() === l.name.toLowerCase()
+              );
+              return {
+                id: l.id,
+                name: l.name,
+                category: l.category,
+                limit: l.limit_minutes,
+                used: matched ? matched.minutes_used : 0,
+              };
+            })
+          );
+        }
+
+        if (persistedShields && persistedShields.length > 0) {
+          setInAppRules(
+            persistedShields.map((s) => ({
+              id: s.id,
+              appName: s.app_name,
+              packageName: s.package_name,
+              appIcon: '🛡️',
+              featureName: s.feature_name,
+              description: `Granular shield for ${s.feature_name} inside ${s.app_name}`,
+              isEnabled: s.is_enabled,
+              blocksPrevented: s.blocks_prevented || 0,
+            }))
+          );
+        }
+
+        if (persistedSchedules && persistedSchedules.length > 0) {
+          setSchedules(
+            persistedSchedules.map((sc) => ({
+              id: sc.id,
+              name: sc.name,
+              type: sc.type,
+              startTime: sc.start_time,
+              endTime: sc.end_time,
+              daysActive: (() => {
+                try {
+                  return JSON.parse(sc.days_active);
+                } catch {
+                  return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+                }
+              })(),
+              isEnabled: sc.is_enabled,
+              blockedApps: (() => {
+                try {
+                  return JSON.parse(sc.blocked_apps);
+                } catch {
+                  return [];
+                }
+              })(),
             }))
           );
         }
@@ -693,20 +842,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const formattedName = name.trim();
     if (!formattedName || isNaN(limitMinutes) || limitMinutes <= 0) return;
 
-    setAppLimits((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
+    setAppLimits((prev) => {
+      // If limit already exists for this app, update its limit instead of creating a duplicate key!
+      const existing = prev.find(
+        (a) => a.name.toLowerCase() === formattedName.toLowerCase()
+      );
+      if (existing) {
+        savePersistedAppLimitAsync({
+          id: existing.id,
+          name: existing.name,
+          category,
+          limit_minutes: limitMinutes,
+          created_at: Date.now(),
+        });
+        return prev.map((a) =>
+          a.id === existing.id
+            ? { ...a, limit: limitMinutes, category }
+            : a
+        );
+      }
+
+      const newId = `app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // Persist to local SQLite
+      savePersistedAppLimitAsync({
+        id: newId,
         name: formattedName,
-        used: 0,
-        limit: limitMinutes,
         category,
-      },
-    ]);
+        limit_minutes: limitMinutes,
+        created_at: Date.now(),
+      });
+
+      return [
+        ...prev,
+        {
+          id: newId,
+          name: formattedName,
+          used: 0,
+          limit: limitMinutes,
+          category,
+        },
+      ];
+    });
   };
 
   const deleteAppLimit = (id: string) => {
     setAppLimits((prev) => prev.filter((app) => app.id !== id));
+    deletePersistedAppLimitAsync(id);
   };
 
   const logAppUsage = (id: string, minutes: number) => {
@@ -715,10 +896,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         app.id === id ? { ...app, used: Math.max(0, app.used + minutes) } : app
       );
 
-      // Connect screen-time limits to SQLite-backed notifications
-      if (localNotificationsEnabled && minutes > 0) {
-        const targetApp = updated.find((a) => a.id === id);
-        if (targetApp && targetApp.limit > 0) {
+      const targetApp = updated.find((a) => a.id === id);
+      if (targetApp) {
+        // Persist daily usage delta directly into local SQLite
+        recordDailyAppUsageAsync({
+          appId: targetApp.id,
+          appName: targetApp.name,
+          category: targetApp.category,
+          minutesDelta: minutes,
+        });
+
+        // Connect screen-time limits to SQLite-backed notifications
+        if (localNotificationsEnabled && minutes > 0 && targetApp.limit > 0) {
           checkAndNotifyAppLimitAsync(targetApp);
         }
       }
@@ -732,6 +921,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCombinedLimits((prev) => prev.map((bundle) => ({ ...bundle, used: 0 })));
     setHourlyUsage([]);
     clearSentNotificationsAsync(getTodayDateKey());
+    resetDailyUsageForDateAsync(getTodayDateKey());
   };
 
   const clearAllData = () => {
@@ -742,6 +932,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setHourlyUsage([]);
     setDeviceApps([]);
     clearNotificationHistory();
+    clearAllPersistedAppDataAsync();
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         window.localStorage.removeItem('sb_device_apps');
@@ -795,34 +986,88 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // In-app granular rule management
   const addInAppRule = (rule: {
     appName: string;
+    packageName?: string;
     appIcon?: string;
     featureName: string;
     description: string;
   }) => {
     if (!rule.appName.trim() || !rule.featureName.trim()) return;
+    const newId = `shield_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     setInAppRules((prev) => [
       ...prev,
       {
-        id: Date.now().toString(),
+        id: newId,
         appName: rule.appName.trim(),
+        packageName: rule.packageName || rule.appName.toLowerCase().replace(/\s+/g, ''),
         appIcon: rule.appIcon || '🛡️',
         featureName: rule.featureName.trim(),
-        description: rule.description.trim() || `Granular shield for ${rule.featureName}`,
+        description: rule.description.trim() || `Granular shield for ${rule.featureName.trim()} inside ${rule.appName.trim()}`,
         isEnabled: true,
+        blocksPrevented: 0,
       },
     ]);
+
+    savePersistedInAppShieldAsync({
+      id: newId,
+      package_name: rule.packageName || rule.appName.toLowerCase().replace(/\s+/g, ''),
+      app_name: rule.appName.trim(),
+      feature_name: rule.featureName.trim(),
+      blocked_keywords: rule.featureName.trim(),
+      is_enabled: true,
+      blocks_prevented: 0,
+      created_at: Date.now(),
+    });
   };
 
   const deleteInAppRule = (id: string) => {
     setInAppRules((prev) => prev.filter((r) => r.id !== id));
+    deletePersistedInAppShieldAsync(id);
   };
 
   const toggleInAppRule = (id: string) => {
     setInAppRules((prev) =>
-      prev.map((rule) =>
-        rule.id === id ? { ...rule, isEnabled: !rule.isEnabled } : rule
-      )
+      prev.map((rule) => {
+        if (rule.id === id) {
+          const nextState = !rule.isEnabled;
+          togglePersistedInAppShieldAsync(id, nextState);
+          return { ...rule, isEnabled: nextState };
+        }
+        return rule;
+      })
     );
+  };
+
+  // Study and Sleep Schedules management (100% on-device SQLite persisted)
+  const addSchedule = async (schedule: Omit<ScheduleItem, 'id' | 'isEnabled'>) => {
+    const newId = `sched_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newItem: ScheduleItem = {
+      ...schedule,
+      id: newId,
+      isEnabled: true,
+    };
+    setSchedules((prev) => [...prev, newItem]);
+    await savePersistedScheduleAsync({
+      id: newId,
+      name: newItem.name,
+      type: newItem.type,
+      start_time: newItem.startTime,
+      end_time: newItem.endTime,
+      days_active: JSON.stringify(newItem.daysActive),
+      is_enabled: true,
+      blocked_apps: JSON.stringify(newItem.blockedApps),
+    });
+  };
+
+  const deleteSchedule = async (id: string) => {
+    setSchedules((prev) => prev.filter((s) => s.id !== id));
+    await deletePersistedScheduleAsync(id);
+  };
+
+  const toggleSchedule = async (id: string) => {
+    setSchedules((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, isEnabled: !s.isEnabled } : s))
+    );
+    await togglePersistedScheduleAsync(id);
   };
 
   // Friends management
@@ -903,6 +1148,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addInAppRule,
         deleteInAppRule,
         toggleInAppRule,
+        schedules,
+        addSchedule,
+        deleteSchedule,
+        toggleSchedule,
         friends,
         addFriend,
         removeFriend,

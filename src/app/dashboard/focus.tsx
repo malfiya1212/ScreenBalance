@@ -1,5 +1,6 @@
 import StayFreeTimePicker from '@/components/StayFreeTimePicker';
 import { useApp } from '@/context/AppContext';
+import { recordFocusSessionAsync } from '@/services/sqliteNotificationStorage';
 import { focusStyles as styles } from '@/styles';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -70,6 +71,16 @@ export default function FocusScreen() {
             setIsTimerRunning(false);
             cancelFocusSession();
             triggerAlarm();
+
+            // Persist completed focus session to local SQLite
+            const targetMins = pickerHours * 60 + pickerMinutes;
+            recordFocusSessionAsync({
+              targetMinutes: targetMins,
+              actualMinutes: targetMins,
+              completed: true,
+              mode: 'timer',
+            });
+
             return 0;
           }
           return prev - 1;
@@ -80,7 +91,7 @@ export default function FocusScreen() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isTimerRunning, countdownSeconds, cancelFocusSession]);
+  }, [isTimerRunning, countdownSeconds, cancelFocusSession, pickerHours, pickerMinutes]);
 
   const stopAlarm = () => {
     setIsAlarmRinging(false);
@@ -270,7 +281,7 @@ export default function FocusScreen() {
                   maxHours={12}
                 />
 
-                <Text className="text-[11px] text-[#7C7389] text-center mt-2">
+                <Text className="text-xs text-[#7C7389] text-center mt-2">
                   Tap or swipe up/down on hours & minutes to adjust duration
                 </Text>
               </View>

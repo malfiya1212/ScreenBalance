@@ -1,8 +1,10 @@
 import { StyleSheet } from 'react-native';
 import { Palette } from './theme';
+import { isTablet } from '@/utils/responsive';
 
 /**
  * Reusable styles for authentication screens (Login, Register, Forgot Password)
+ * Responsive across phones and tablets.
  */
 export const authStyles = StyleSheet.create({
   safeArea: {
@@ -12,10 +14,13 @@ export const authStyles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: isTablet ? 32 : 24,
+    paddingVertical: 16,
   },
   cardContainer: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: isTablet ? 580 : 440,
+    alignSelf: 'center',
   },
   backButton: {
     backgroundColor: '#1E1838',
@@ -23,6 +28,8 @@ export const authStyles = StyleSheet.create({
   },
   subtitle: {
     color: Palette.textSubtitle,
+    fontSize: isTablet ? 16 : 14,
+    lineHeight: isTablet ? 24 : 20,
   },
   errorBanner: {
     backgroundColor: Palette.dangerBg,
@@ -39,15 +46,16 @@ export const authStyles = StyleSheet.create({
   demoHintCard: {
     backgroundColor: '#161329',
     borderColor: '#2B234D',
+    padding: isTablet ? 16 : 12,
   },
   inputWrapper: {
     backgroundColor: Palette.inputBg,
     borderColor: Palette.inputBorder,
-    minHeight: 52,
+    minHeight: 54,
   },
   inputText: {
     color: Palette.textWhite,
-    fontSize: 14,
+    fontSize: isTablet ? 16 : 14,
   },
   primaryButton: {
     backgroundColor: Palette.primaryPurple,
@@ -57,7 +65,7 @@ export const authStyles = StyleSheet.create({
     shadowOpacity: 0.45,
     shadowRadius: 12,
     elevation: 6,
-    minHeight: 52,
+    minHeight: 56,
   },
   primaryButtonDisabled: {
     backgroundColor: Palette.primaryPurpleDisabled,
@@ -65,12 +73,17 @@ export const authStyles = StyleSheet.create({
   emailActionButton: {
     backgroundColor: '#1E1B4B',
     borderColor: '#4338CA',
-    minHeight: 50,
+    minHeight: 52,
+  },
+  returnButton: {
+    backgroundColor: '#1E1B4B',
+    borderColor: '#4338CA',
+    minHeight: 52,
   },
   secondaryOutlineButton: {
     backgroundColor: 'transparent',
     borderColor: '#3B335E',
-    minHeight: 48,
+    minHeight: 50,
   },
   dividerLine: {
     backgroundColor: Palette.divider,
@@ -78,7 +91,7 @@ export const authStyles = StyleSheet.create({
   googleButton: {
     backgroundColor: Palette.inputBg,
     borderColor: Palette.inputBorder,
-    minHeight: 50,
+    minHeight: 54,
   },
   linkHighlight: {
     color: Palette.textAccentLight,
@@ -87,6 +100,8 @@ export const authStyles = StyleSheet.create({
   // Success cards (Register success & Forgot password success)
   instructionText: {
     color: Palette.textSubtitle,
+    fontSize: isTablet ? 16 : 14,
+    lineHeight: isTablet ? 24 : 20,
   },
   successCard: {
     backgroundColor: '#131B2A',
@@ -97,9 +112,6 @@ export const authStyles = StyleSheet.create({
   },
   successEmailNotice: {
     color: Palette.textSubtitle,
-  },
-  returnButton: {
-    backgroundColor: Palette.primaryPurple,
-    borderColor: Palette.primaryPurpleBorder,
+    fontSize: isTablet ? 15 : 13,
   },
 });

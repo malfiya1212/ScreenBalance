@@ -72,7 +72,7 @@ export default function ProtocolCard({
           <Text
             allowFontScaling={true}
             maxFontSizeMultiplier={1.2}
-            className="text-[10px] font-black uppercase tracking-wider text-text-obsidian"
+            className="text-xs font-black uppercase tracking-wider text-text-obsidian"
           >
             {statusLabel}
           </Text>

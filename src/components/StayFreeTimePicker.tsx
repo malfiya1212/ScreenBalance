@@ -15,10 +15,22 @@ interface StayFreeTimePickerProps {
   hours: number;
   minutes: number;
   onChange: (hours: number, minutes: number) => void;
-  maxHours?: number; // default 12 (or 23)
+  maxHours?: number; // default 12
 }
 
 const ITEM_HEIGHT = 52;
+
+const triggerHaptic = () => {
+  try {
+    if (Platform.OS === 'android') {
+      Vibration.vibrate(25);
+    } else {
+      Vibration.vibrate(15);
+    }
+  } catch {
+    // Ignore if not supported
+  }
+};
 
 interface WheelColumnProps {
   value: number;
@@ -37,10 +49,7 @@ function WheelColumn({
   const isUserInteracting = useRef(false);
   const scrollTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // We repeat the base items 3 times to create an infinite rolling loop
-  // Set 0: 0..totalCount-1
-  // Set 1: 0..totalCount-1 (center set)
-  // Set 2: 0..totalCount-1
+  // We repeat items 3 times for a seamless rolling experience
   const items = useMemo(() => {
     const base = Array.from({ length: totalCount }, (_, i) => i);
     return [
@@ -50,28 +59,24 @@ function WheelColumn({
     ];
   }, [totalCount]);
 
-  // Helper to calculate target scroll offset for a specific value in Set 1
   const getScrollOffset = useMemo(
-    () =>
-      (targetVal: number) => {
-        // In Set 1, targetVal is at index (totalCount + targetVal)
-        // Since middle row is visible at y=52..104, scrollOffset is (index - 1) * ITEM_HEIGHT
-        return (totalCount + targetVal - 1) * ITEM_HEIGHT;
-      },
+    () => (targetVal: number) => {
+      return (totalCount + targetVal - 1) * ITEM_HEIGHT;
+    },
     [totalCount]
   );
 
-  // Initial positioning on mount
+  // Initial position on mount
   React.useEffect(() => {
     const timer = setTimeout(() => {
       const initialOffset = getScrollOffset(value);
       scrollViewRef.current?.scrollTo({ y: initialOffset, animated: false });
-    }, 60);
+    }, 50);
 
     return () => clearTimeout(timer);
   }, [getScrollOffset, value]);
 
-  // When value prop updates externally, animate scroll if user is not actively dragging
+  // Sync scroll when value changes from outside (e.g. preset selection)
   React.useEffect(() => {
     if (!isUserInteracting.current) {
       const targetOffset = getScrollOffset(value);
@@ -79,21 +84,17 @@ function WheelColumn({
     }
   }, [getScrollOffset, value]);
 
-  // Handle direct item selection on tap
+  // Handle direct item click
   const handleItemPress = (itemValue: number) => {
-    try {
-      Vibration.vibrate(15);
-    } catch {}
+    triggerHaptic();
     onValueChange(itemValue);
     const targetOffset = getScrollOffset(itemValue);
     scrollViewRef.current?.scrollTo({ y: targetOffset, animated: true });
   };
 
-  // Step up or down by delta
+  // Step up or down
   const handleStep = (delta: number) => {
-    try {
-      Vibration.vibrate(15);
-    } catch {}
+    triggerHaptic();
     const nextVal = (value + delta + totalCount) % totalCount;
     onValueChange(nextVal);
     const targetOffset = getScrollOffset(nextVal);
@@ -103,18 +104,14 @@ function WheelColumn({
   // Called when scroll ends
   const handleScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const scrollY = e.nativeEvent.contentOffset.y;
-    // The middle item index is scrollY / ITEM_HEIGHT + 1
     const centerIdx = Math.round(scrollY / ITEM_HEIGHT) + 1;
     const selectedVal = ((centerIdx % totalCount) + totalCount) % totalCount;
 
     if (selectedVal !== value) {
-      try {
-        Vibration.vibrate(15);
-      } catch {}
+      triggerHaptic();
       onValueChange(selectedVal);
     }
 
-    // Keep scroll position within Set 1 boundaries
     if (centerIdx < totalCount || centerIdx >= totalCount * 2) {
       const resetOffset = (totalCount + selectedVal - 1) * ITEM_HEIGHT;
       if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
@@ -126,45 +123,43 @@ function WheelColumn({
     isUserInteracting.current = false;
   };
 
-  // Desktop Web mouse wheel handler
-  const handleWheel = (e: any) => {
-    if (Platform.OS === 'web' && e && typeof e.deltaY === 'number') {
-      if (Math.abs(e.deltaY) > 2) {
-        const delta = e.deltaY > 0 ? 1 : -1;
-        handleStep(delta);
-      }
-    }
-  };
-
   return (
     <View
       style={[styles.wheelColumn, { height: ITEM_HEIGHT * 3 }]}
-      className="flex-1 max-w-[150px] border overflow-hidden relative"
-      {...(Platform.OS === 'web' ? { onWheel: handleWheel } : {})}
+      className="flex-1 max-w-[155px] border border-[#372863] overflow-hidden relative rounded-2xl bg-[#1C1530]"
     >
-      {/* Background Selection Indicator (Center Row: y=52 to y=104) */}
+      {/* Background Selection Indicator (BEHIND the text at zIndex: 0) */}
       <View
         pointerEvents="none"
-        style={[
-          styles.selectedRow,
-          {
-            position: 'absolute',
-            top: ITEM_HEIGHT,
-            left: 0,
-            right: 0,
-            height: ITEM_HEIGHT,
-            borderTopWidth: 1,
-            borderBottomWidth: 1,
-            borderTopColor: '#3D3354',
-            borderBottomColor: '#3D3354',
-            zIndex: 1,
-          },
-        ]}
+        style={{
+          position: 'absolute',
+          top: ITEM_HEIGHT,
+          left: 4,
+          right: 4,
+          height: ITEM_HEIGHT,
+          backgroundColor: 'rgba(124, 58, 237, 0.22)',
+          borderWidth: 1.5,
+          borderColor: '#7C3AED',
+          borderRadius: 12,
+          zIndex: 0,
+        }}
       />
 
-      {/* Vertical Scroll List */}
+      {/* Step Up Button */}
+      <Pressable
+        onPress={() => handleStep(-1)}
+        hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
+        style={{ position: 'absolute', top: 4, right: 8, zIndex: 2 }}
+        className="px-1.5 py-0.5 rounded active:bg-[#3D2D68]"
+        accessibilityLabel="Step up"
+      >
+        <Text className="text-xs text-[#C4B5FD] font-bold">▲</Text>
+      </Pressable>
+
+      {/* Vertical Scroll List (zIndex: 1, transparent background so text floats over the indicator) */}
       <ScrollView
         ref={scrollViewRef}
+        style={{ zIndex: 1, backgroundColor: 'transparent' }}
         showsVerticalScrollIndicator={false}
         snapToInterval={ITEM_HEIGHT}
         snapToAlignment="start"
@@ -187,16 +182,15 @@ function WheelColumn({
               key={`${item.set}-${item.val}-${index}`}
               onPress={() => handleItemPress(item.val)}
               style={{ height: ITEM_HEIGHT }}
-              className="w-full items-center justify-center active:bg-[#322C3E]"
+              className="w-full items-center justify-center active:opacity-75"
               accessibilityRole="button"
               accessibilityLabel={formatLabel(item.val)}
             >
               <Text
-                style={isSelected ? styles.selectedLabel : styles.unselectedLabel}
                 className={
                   isSelected
                     ? 'text-[16px] font-black tracking-tight text-white'
-                    : 'text-[14px] font-medium tracking-tight text-[#9E9AA7]'
+                    : 'text-[13px] font-medium tracking-tight text-[#8E87A3]'
                 }
               >
                 {formatLabel(item.val)}
@@ -206,30 +200,29 @@ function WheelColumn({
         })}
       </ScrollView>
 
-      {/* Subtle Step Up Button overlay on top edge for quick single steps */}
-      <Pressable
-        onPress={() => handleStep(-1)}
-        hitSlop={{ top: 4, bottom: 4, left: 10, right: 10 }}
-        style={{ position: 'absolute', top: 4, right: 8, zIndex: 2 }}
-        className="opacity-40 active:opacity-100"
-        accessibilityLabel="Step up"
-      >
-        <Text className="text-[10px] text-[#A69FC0]">▲</Text>
-      </Pressable>
-
-      {/* Subtle Step Down Button overlay on bottom edge for quick single steps */}
+      {/* Step Down Button */}
       <Pressable
         onPress={() => handleStep(1)}
-        hitSlop={{ top: 4, bottom: 4, left: 10, right: 10 }}
+        hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
         style={{ position: 'absolute', bottom: 4, right: 8, zIndex: 2 }}
-        className="opacity-40 active:opacity-100"
+        className="px-1.5 py-0.5 rounded active:bg-[#3D2D68]"
         accessibilityLabel="Step down"
       >
-        <Text className="text-[10px] text-[#A69FC0]">▼</Text>
+        <Text className="text-xs text-[#C4B5FD] font-bold">▼</Text>
       </Pressable>
     </View>
   );
 }
+
+const PRESET_ALLOWANCES = [
+  { label: '15m', hours: 0, minutes: 15 },
+  { label: '30m', hours: 0, minutes: 30 },
+  { label: '45m', hours: 0, minutes: 45 },
+  { label: '1h', hours: 1, minutes: 0 },
+  { label: '1h 30m', hours: 1, minutes: 30 },
+  { label: '2h', hours: 2, minutes: 0 },
+  { label: '3h', hours: 3, minutes: 0 },
+];
 
 export default function StayFreeTimePicker({
   hours,
@@ -262,23 +255,69 @@ export default function StayFreeTimePicker({
     [hours, onChange]
   );
 
-  return (
-    <View className="flex-row items-center justify-center gap-3.5 my-2">
-      {/* COLUMN 1: HOURS WHEEL */}
-      <WheelColumn
-        value={hours}
-        totalCount={totalHoursCount}
-        formatLabel={formatHourLabel}
-        onValueChange={handleHourChange}
-      />
+  const handleSelectPreset = (presetH: number, presetM: number) => {
+    triggerHaptic();
+    onChange(presetH, presetM);
+  };
 
-      {/* COLUMN 2: MINUTES WHEEL */}
-      <WheelColumn
-        value={minutes}
-        totalCount={totalMinutesCount}
-        formatLabel={formatMinuteLabel}
-        onValueChange={handleMinuteChange}
-      />
+  return (
+    <View className="my-2">
+      {/* Quick Preset Time Chips */}
+      <View className="mb-3">
+        <Text className="text-xs font-semibold text-[#8E87A3] mb-1.5 px-0.5">
+          Quick Presets:
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8 }}
+        >
+          {PRESET_ALLOWANCES.map((p) => {
+            const isMatch = hours === p.hours && minutes === p.minutes;
+            return (
+              <Pressable
+                key={p.label}
+                onPress={() => handleSelectPreset(p.hours, p.minutes)}
+                className={`px-3.5 py-2 rounded-xl border ${
+                  isMatch
+                    ? 'bg-[#3D2D68] border-[#A7F3D0]'
+                    : 'bg-[#1E1738] border-[#2E2554] active:bg-[#2A204C]'
+                }`}
+              >
+                <Text
+                  className={`text-xs font-bold ${
+                    isMatch ? 'text-[#A7F3D0]' : 'text-[#C5BFD6]'
+                  }`}
+                >
+                  {p.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Dual Wheel Rollers (Hours & Minutes) */}
+      <View className="flex-row items-center justify-center gap-3.5">
+        {/* COLUMN 1: HOURS WHEEL */}
+        <WheelColumn
+          value={hours}
+          totalCount={totalHoursCount}
+          formatLabel={formatHourLabel}
+          onValueChange={handleHourChange}
+        />
+
+        {/* Separator Colon */}
+        <Text className="text-lg font-extrabold text-[#7C3AED]">:</Text>
+
+        {/* COLUMN 2: MINUTES WHEEL */}
+        <WheelColumn
+          value={minutes}
+          totalCount={totalMinutesCount}
+          formatLabel={formatMinuteLabel}
+          onValueChange={handleMinuteChange}
+        />
+      </View>
     </View>
   );
 }

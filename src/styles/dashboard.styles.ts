@@ -1,16 +1,24 @@
 import { StyleSheet } from 'react-native';
 import { Palette } from './theme';
+import { isTablet } from '@/utils/responsive';
 
 /**
  * Dedicated styles for the Dashboard Screen (src/app/dashboard/index.tsx)
+ * Responsive across all devices (phones & tablets).
  */
 export const dashboardStyles = StyleSheet.create({
   bgApp: {
     backgroundColor: Palette.bgApp,
   },
+  contentContainer: {
+    width: '100%',
+    maxWidth: isTablet ? 720 : 480,
+    alignSelf: 'center',
+  },
   topBar: {
     backgroundColor: Palette.bgApp,
     borderBottomColor: Palette.borderDark,
+    paddingVertical: isTablet ? 12 : 8,
   },
   card: {
     backgroundColor: Palette.cardPlum,
@@ -49,21 +57,30 @@ export const dashboardStyles = StyleSheet.create({
   trackingActiveBadge: {
     backgroundColor: Palette.successBg,
     borderColor: Palette.successDark,
+    paddingHorizontal: isTablet ? 12 : 8,
+    paddingVertical: isTablet ? 6 : 4,
   },
   trackingInactiveBadge: {
     backgroundColor: '#332326',
     borderColor: Palette.danger,
+    paddingHorizontal: isTablet ? 12 : 8,
+    paddingVertical: isTablet ? 6 : 4,
   },
   trackingActiveText: {
     color: Palette.successText,
+    fontSize: isTablet ? 13 : 11,
+    fontWeight: '700',
   },
   trackingInactiveText: {
     color: Palette.dangerText,
+    fontSize: isTablet ? 13 : 11,
+    fontWeight: '700',
   },
   inputField: {
     backgroundColor: Palette.bgApp,
     borderColor: Palette.borderPlum,
     color: Palette.textWhite,
+    fontSize: isTablet ? 15 : 13,
   },
   textAccent: {
     color: Palette.textAccent,
@@ -79,11 +96,13 @@ export const dashboardStyles = StyleSheet.create({
   },
   chartTabTextActive: {
     color: Palette.textWhite,
-    fontSize: 12,
+    fontSize: isTablet ? 14 : 12,
+    fontWeight: '700',
   },
   chartTabTextInactive: {
     color: Palette.textSecondary,
-    fontSize: 12,
+    fontSize: isTablet ? 14 : 12,
+    fontWeight: '600',
   },
   chartDot: {
     borderRadius: 7,
@@ -102,10 +121,12 @@ export const dashboardStyles = StyleSheet.create({
   chartLabelSelected: {
     color: Palette.accentDeepPurpleBorder,
     fontWeight: 'bold',
+    fontSize: isTablet ? 13 : 11,
   },
   chartLabelNormal: {
     color: Palette.textMuted,
     fontWeight: 'normal',
+    fontSize: isTablet ? 13 : 11,
   },
   chartBarMobile: {
     backgroundColor: Palette.accentDeepPurpleBorder,
@@ -148,9 +169,13 @@ export const dashboardStyles = StyleSheet.create({
   },
   filterTextActive: {
     color: Palette.textWhite,
+    fontSize: isTablet ? 14 : 12,
+    fontWeight: '700',
   },
   filterTextInactive: {
     color: Palette.textSecondary,
+    fontSize: isTablet ? 14 : 12,
+    fontWeight: '600',
   },
   rowDivider: {
     borderBottomColor: '#2A2436',
@@ -171,11 +196,13 @@ export const dashboardStyles = StyleSheet.create({
   metricCard: {
     backgroundColor: '#1B1724',
     borderColor: '#2E273B',
+    padding: isTablet ? 16 : 12,
   },
   // Challenge Card
   challengeCard: {
     backgroundColor: '#201B2B',
     borderColor: '#2E273B',
+    padding: isTablet ? 20 : 16,
   },
   challengeBadge: {
     backgroundColor: '#2D253D',

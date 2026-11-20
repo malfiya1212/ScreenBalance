@@ -76,7 +76,7 @@ export default function NotificationToast() {
             <View
               className={`px-2 py-0.5 rounded-full border ${badge.bg} ${badge.border}`}
             >
-              <Text className={`text-[10px] font-black uppercase tracking-wider ${badge.text}`}>
+              <Text className={`text-xs font-black uppercase tracking-wider ${badge.text}`}>
                 {activeToast.severity}
               </Text>
             </View>
@@ -101,13 +101,13 @@ export default function NotificationToast() {
         </Text>
 
         <View className="flex-row items-center justify-between mt-2 pt-1.5 border-t border-[#312552] pl-1">
-          <Text className="text-[10px] font-semibold text-[#8C83A4]">
+          <Text className="text-xs font-semibold text-[#8C83A4]">
             App: <Text className="text-white font-bold">{activeToast.appName}</Text> •{' '}
             {activeToast.remainingMinutes <= 0
               ? 'Limit Reached'
               : `${activeToast.remainingMinutes}m remaining`}
           </Text>
-          <Text className="text-[10px] text-[#A69FC0]">Tap to dismiss</Text>
+          <Text className="text-xs text-[#A69FC0]">Tap to dismiss</Text>
         </View>
       </Pressable>
     </View>

@@ -174,7 +174,7 @@ export default function ForgotPasswordScreen() {
                     <Text className="font-bold text-white text-sm">{email}</Text>
                   </Text>
 
-                  <Text className="text-[11px] text-[#7E7599] text-center mt-1 px-2">
+                  <Text className="text-xs text-[#7E7599] text-center mt-1 px-2">
                     Please check your inbox or spam folder, then sign in with your updated credentials.
                   </Text>
 
